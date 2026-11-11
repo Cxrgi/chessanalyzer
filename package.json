@@ -1,0 +1,10 @@
+{
+  "name": "chessanalyzer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Kostenlose Partieanalyse für chess.com-Partien – mit Stockfish direkt im Browser",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
