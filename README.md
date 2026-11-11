@@ -9,6 +9,10 @@ Nicht mit Chess.com verbunden. Die komplette Analyse läuft im Browser auf deine
 
 ## Was die Seite kann
 
+- **Passwortschutz**: Beim ersten Besuch legst du ein Passwort fest; danach kommt niemand ohne Anmeldung auf die Seite
+- **Startseite** mit allen Bereichen auf einen Blick
+- **Lektionen**: 28 kurze, interaktive Lektionen in fünf Kursen (Grundlagen, Taktik, Mattbilder, Eröffnung, Endspiel) –
+  mit Aufgaben direkt auf dem Brett, Tipps, Lösungen und gespeichertem Fortschritt
 - **Partie laden** über einen chess.com-Link, über deinen Benutzernamen (Liste der letzten Partien) oder per PGN
 - **Jeder Zug bewertet**: Brillant, Großartig, Bester Zug, Ausgezeichnet, Gut, Buchzug, Ungenauigkeit, Fehler, Verpasste Chance, Patzer
 - **Bewertungsleiste**, Genauigkeit für beide Seiten, Bewertungsdiagramm, Eröffnungsname
@@ -24,6 +28,17 @@ Nicht mit Chess.com verbunden. Die komplette Analyse läuft im Browser auf deine
   FEN einfügen) und von dort aus weiterspielen
 - Uhren, geschlagene Figuren, Brett drehen, Tastatursteuerung (← → Pos1 Ende, F = drehen, N = nächster Schlüsselmoment), Töne
 - Brettfarben und Figurensets wählbar, bereits analysierte Partien werden im Browser gespeichert
+
+## Passwort
+
+- Beim allerersten Aufruf fragt die Seite nach einem neuen Passwort und zeigt einmalig einen **Notfall-Code**.
+  Mit ihm lässt sich der Schutz zurücksetzen, falls das Passwort vergessen wurde („Passwort vergessen?“ auf der Anmeldeseite).
+- Ändern lässt sich das Passwort in den Einstellungen (Zahnrad), abmelden über das Symbol daneben.
+- Gespeichert wird nur ein gesalzener Hash – auf Netlify im Blob-Speicher `auth`, lokal in `.data/auth.json`.
+  Wer beides verloren hat (Passwort und Notfall-Code), löscht diesen Eintrag und richtet die Seite neu ein.
+- Geschützt sind Seite, Skripte, Daten und `/api/*`. Bilder, Stylesheet und die Engine-Dateien bleiben abrufbar.
+- Auf rein statischem Hosting (z. B. GitHub Pages) gibt es keinen Passwortschutz, weil dort kein Server-Code läuft.
+- Lokal ohne Passwort starten: `NO_PASSWORD=1 npm start`
 
 ## Starten
 
@@ -53,6 +68,8 @@ Hosting versucht die Seite zusätzlich öffentliche CORS-Proxys (allorigins, cod
 ## Grenzen
 
 - Nur normales Schach (kein Chess960 und keine anderen Varianten).
+- Die Lektionen sind eigene Inhalte zu den üblichen Themen eines Schachkurses – nicht die Lektionen von chess.com,
+  denn deren Texte, Videos und Aufgaben sind urheberrechtlich geschützt.
 - Das Brett-Design, das du auf chess.com eingestellt hast, wird von chess.com nicht mitgeliefert – deshalb startet die Seite
   mit dem grünen Brett. Die Figuren sind freie Sets, nicht die von chess.com (die sind urheberrechtlich geschützt).
 - Die Erklärungen des Coachs entstehen aus Engine-Daten und Taktik-Mustern, nicht aus einer KI. Sie treffen meistens den Punkt,
@@ -72,6 +89,9 @@ js/coach.js           Erklärungen
 js/tactics.js         Abtausch, hängende Figuren, Gabeln
 js/board.js           Schachbrett
 js/editor.js          Stellungs-Editor für das Analysebrett
+js/lessons.js         Lektions-Übersicht und -Player
+js/lessons-data.js    Inhalte aller Lektionen (geprüft mit tools/check-lessons.mjs)
+server/gate.mjs       Passwortschutz (lokaler Server und Netlify Edge Function)
 data/openings.json    Eröffnungsbuch (erzeugt mit tools/build-openings.mjs)
 server.js             Lokaler Server mit /api/game
 netlify/functions/    Dieselbe Funktion für Netlify

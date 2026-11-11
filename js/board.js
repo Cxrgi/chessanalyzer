@@ -332,7 +332,18 @@ export class Board {
     if (piece) this.drag = { from: sq, el: piece.el, startX: e.clientX, startY: e.clientY, moved: false, free: true };
   }
 
+  /** Feld-Auswahl: Jeder Klick meldet nur das angetippte Feld (für Lektionen). */
+  setPicker(fn) {
+    this.picker = fn || null;
+    this.root.classList.toggle('picking', !!fn);
+  }
+
   onPointerDown(e) {
+    if (this.picker) {
+      const sq = e.button > 0 ? null : this.squareAt(e.clientX, e.clientY);
+      if (sq) this.picker(sq);
+      return;
+    }
     if (this.editor) {
       this.editDown(e);
       return;

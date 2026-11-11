@@ -1,6 +1,7 @@
 // Hauptlogik: Partie laden → analysieren → Übersicht → Zug für Zug mit Coach.
 import { Chess } from '../vendor/chess.js';
 import { openEditor, bindEditor } from './editor.js';
+import { initLessons, renderLessonList, openLesson, lessonTargets, lessonMove, lessonKey, lessonProgress } from './lessons.js';
 import { Board } from './board.js';
 import { AnalysisPool, LiveEngine } from './engine.js';
 import { reviewGame, winPct, evalText, CLASSES, CLASS_ORDER, BAD } from './analysis.js';
@@ -87,6 +88,8 @@ function init() {
   renderHistory();
   $('user-input').value = S.username;
   bindEditor({ board, $, setCoach, uiIcon, copyText, pieceSet: () => S.settings.pieces, onPlay: (fen) => openBoard(fen), onCancel: closeEditor });
+  initLessons({ board, $, setCoach, store, uiIcon, esc, playSound, enterLessonView });
+  initAccount();
   routeFromHash();
   watchHostBadge();
 }
@@ -119,9 +122,8 @@ function buildStaticIcons() {
   $('ctl-last').innerHTML = uiIcon('last', 20);
   $('ctl-flip').innerHTML = uiIcon('flip', 20);
   $('ctl-key').innerHTML = uiIcon('star', 20);
-  $('f1').innerHTML = ['brilliant', 'best', 'blunder'].map((c) => classIcon(c, 26)).join('');
-  $('f2').innerHTML = classIcon('great', 26) + classIcon('book', 26);
-  $('f3').innerHTML = classIcon('excellent', 26) + classIcon('miss', 26);
+  $('btn-logout').innerHTML = uiIcon('logout', 20);
+  document.querySelectorAll('[data-ico]').forEach((el) => { el.innerHTML = uiIcon(el.dataset.ico, 24); });
 }
 
 function applySettings() {
@@ -196,7 +198,22 @@ function bindEvents() {
   $('games-close').onclick = () => { $('games-card').hidden = true; };
   $('btn-new').onclick = goHome;
   $('btn-board').onclick = () => openBoard(S.mode === 'game' && S.view === 'moves' ? currentFen() : null);
-  $('btn-board-home').onclick = () => openBoard();
+  document.querySelector('.tiles').addEventListener('click', (e) => {
+    const t = e.target.closest('.tile');
+    if (!t) return;
+    const go = t.dataset.go;
+    if (go === 'analyse' || go === 'lektionen' || go === 'brett') location.hash = '#' + go;
+    else if (go === 'editor') { openBoard(); showEditor(currentFen()); }
+    else if (go === 'demo') startGame(gameFromPgn(DEMO_PGN));
+    else if (go === 'recent') {
+      location.hash = '#analyse';
+      setTimeout(() => (S.username ? showRecentGames(S.username) : $('user-input').focus()), 50);
+    }
+  });
+  $('hub-continue').onclick = () => {
+    const { next } = lessonProgress();
+    if (next) location.hash = '#lektion/' + next.id;
+  };
   $('bt-edit').onclick = () => showEditor(currentFen());
   $('bt-reset').onclick = () => openBoard(START_FEN);
   $('bt-fen').onclick = (e) => copyText(currentFen(), e.currentTarget);
@@ -260,8 +277,12 @@ function bindEvents() {
   });
 
   document.addEventListener('keydown', (e) => {
-    if (S.view !== 'moves' && S.view !== 'overview') return;
     if (e.target.closest('input, textarea, dialog') || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (S.view === 'lesson') {
+      if (lessonKey(e.key)) e.preventDefault();
+      return;
+    }
+    if (S.view !== 'moves' && S.view !== 'overview') return;
     if (e.key === 'ArrowRight') {
       if (S.view === 'overview') { showMoves(); go(0); } else next();
     } else if (e.key === 'ArrowLeft') prev();
@@ -424,7 +445,20 @@ function saveToHistory(game, positions, depth) {
 async function routeFromHash() {
   const id = decodeURIComponent(location.hash.slice(1));
   if (!id) {
-    if (S.view !== 'home') goHome(true);
+    if (S.view !== 'hub') goHome(true);
+    return;
+  }
+  if (id === 'analyse') {
+    showAnalyze();
+    return;
+  }
+  if (id === 'lektionen') {
+    showLessons();
+    return;
+  }
+  if (id.startsWith('lektion/')) {
+    leaveModes();
+    if (!openLesson(id.slice(8))) showLessons();
     return;
   }
   if (id === 'brett') {
@@ -447,25 +481,113 @@ async function routeFromHash() {
   }
 }
 
-function goHome(fromHash) {
+/** Zeigt genau einen Hauptbereich: hub | home | lessons | review. */
+function showMain(name) {
+  for (const id of ['hub', 'home', 'lessons', 'review']) $(id).hidden = id !== name;
+  $('btn-new').hidden = name === 'hub';
+}
+
+/** Räumt auf, bevor ein anderer Bereich geöffnet wird (Engine stoppen, Sondermodi beenden). */
+function leaveModes() {
   if (S.pool) S.pool.cancel();
   S.pool = null;
   live.stop();
-  S.view = 'home';
-  S.mode = null;
   S.live = null;
+  S.mode = null;
   board.setEditor(null);
+  board.setPicker(null);
+  board.setInteractive(false);
   document.querySelector('.panel').classList.remove('is-editor');
-  $('pane-editor').hidden = true;
+  $('review').classList.remove('lesson-mode');
+  $('pane-editor').hidden = $('pane-lesson').hidden = true;
   $('coach').hidden = false;
   S.game = S.review = S.variation = S.retry = null;
-  $('review').hidden = true;
-  $('home').hidden = false;
-  $('btn-new').hidden = true;
+}
+
+/** Startseite mit allen Bereichen. */
+function goHome(fromHash) {
+  leaveModes();
+  S.view = 'hub';
+  showMain('hub');
   setStatus('');
   renderHistory();
+  renderHub();
   if (fromHash !== true && location.hash) history.pushState(null, '', location.pathname + location.search);
-  document.title = 'Chess Analyzer – kostenlose Partieanalyse';
+  document.title = 'Chess Analyzer';
+  window.scrollTo(0, 0);
+}
+
+function renderHub() {
+  const { done, total, next } = lessonProgress();
+  $('tile-prog').innerHTML = `<span>${done} von ${total} geschafft</span><div class="bar"><i style="width:${(done / total) * 100}%"></i></div>`;
+  const cont = $('hub-continue');
+  cont.hidden = !next || done === 0;
+  if (next) cont.innerHTML = `<div><span>Weiter lernen</span><b>${esc(next.title)}</b></div>${uiIcon('arrow', 22)}`;
+}
+
+/** Seite „Partie analysieren“ (Link, Benutzername, PGN). */
+function showAnalyze() {
+  leaveModes();
+  S.view = 'home';
+  showMain('home');
+  setStatus('');
+  document.title = 'Partie analysieren · Chess Analyzer';
+  window.scrollTo(0, 0);
+}
+
+function showLessons() {
+  leaveModes();
+  S.view = 'lessons';
+  showMain('lessons');
+  const { done, total } = lessonProgress();
+  $('lessons-lead').textContent = done ? `${done} von ${total} Lektionen geschafft. Mach da weiter, wo du aufgehört hast.` : `${total} kurze Lektionen mit Aufgaben direkt auf dem Brett. Fang einfach vorn an.`;
+  renderLessonList();
+  document.title = 'Lektionen · Chess Analyzer';
+  window.scrollTo(0, 0);
+}
+
+/** Bereitet die Brettansicht für eine Lektion vor (wird vom Lektions-Player aufgerufen). */
+function enterLessonView(title) {
+  S.mode = 'lesson';
+  S.view = 'lesson';
+  showMain('review');
+  $('review').classList.add('lesson-mode');
+  $('pane-progress').hidden = $('pane-overview').hidden = $('pane-moves').hidden = $('pane-editor').hidden = true;
+  $('controls').hidden = true;
+  $('pane-lesson').hidden = false;
+  document.title = `${title} · Chess Analyzer`;
+  window.scrollTo(0, 0);
+}
+
+/** Anmeldung: Abmelden-Knopf und „Passwort ändern“ nur zeigen, wenn die Seite geschützt läuft. */
+async function initAccount() {
+  let status = null;
+  try {
+    const res = await fetch('api/auth/status');
+    if (res.ok) status = await res.json();
+  } catch (e) { /* kein Passwortschutz auf diesem Server */ }
+  if (!status || !status.configured) return;
+  $('btn-logout').hidden = false;
+  $('pw-box').hidden = false;
+  $('btn-logout').onclick = async () => {
+    await fetch('api/auth/logout', { method: 'POST' }).catch(() => {});
+    location.href = location.pathname;
+  };
+  $('pw-save').onclick = async () => {
+    const msg = $('pw-msg');
+    msg.textContent = '';
+    const res = await fetch('api/auth/password', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current: $('pw-current').value, next: $('pw-next').value }),
+    }).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
+    if (res && res.ok) {
+      msg.textContent = 'Passwort geändert.';
+      $('pw-current').value = $('pw-next').value = '';
+    } else {
+      msg.textContent = { wrong: 'Das aktuelle Passwort stimmt nicht.', weak: 'Das neue Passwort braucht mindestens 6 Zeichen.', locked: 'Zu viele Versuche. Bitte warte ein paar Minuten.' }[data.error] || 'Das hat nicht geklappt.';
+    }
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -486,11 +608,9 @@ async function loadBook() {
 async function startGame(game, cached) {
   if (S.pool) S.pool.cancel();
   live.stop();
+  leaveModes();
   S.game = game;
   S.mode = 'game';
-  board.setEditor(null);
-  document.querySelector('.panel').classList.remove('is-editor');
-  $('pane-editor').hidden = true;
   $('board-tools').hidden = true;
   $('ctl-overview').hidden = $('ctl-key').hidden = false;
   $('graph-moves').parentElement.hidden = false;
@@ -503,9 +623,7 @@ async function startGame(game, cached) {
   S.orientation = S.you === 'b' ? 'b' : 'w';
   board.setOrientation(S.orientation);
 
-  $('home').hidden = true;
-  $('review').hidden = false;
-  $('btn-new').hidden = false;
+  showMain('review');
   $('pane-overview').hidden = $('pane-moves').hidden = $('controls').hidden = true;
   $('pane-progress').hidden = false;
   $('progress-fill').style.width = '0%';
@@ -783,6 +901,7 @@ function flip() {
 // ---------------------------------------------------------------------------
 
 function legalTargets(square) {
+  if (S.mode === 'lesson') return lessonTargets(square);
   if (S.view !== 'moves') return [];
   if (S.retry && S.retry.state !== 'waiting') return [];
   const chess = new Chess(currentFen());
@@ -799,6 +918,10 @@ function toMove(m, fen) {
 }
 
 function onUserMove({ from, to, promotion }) {
+  if (S.mode === 'lesson') {
+    lessonMove({ from, to, promotion });
+    return;
+  }
   const fen = currentFen();
   const chess = new Chess(fen);
   let m;
@@ -1445,9 +1568,7 @@ function saveBoard() {
 
 /** Öffnet das Analysebrett – mit einer Stellung oder dem zuletzt gespeicherten Stand. */
 function openBoard(fen, ucis = [], idx = null) {
-  if (S.pool) S.pool.cancel();
-  S.pool = null;
-  live.stop();
+  leaveModes();
   if (!fen) {
     const saved = store.get('board', null);
     if (saved && saved.startFen) ({ startFen: fen, ucis, idx } = saved);
@@ -1478,12 +1599,7 @@ function openBoard(fen, ucis = [], idx = null) {
     idx: idx == null ? moves.length : Math.max(0, Math.min(moves.length, idx)),
   };
 
-  board.setEditor(null);
-  document.querySelector('.panel').classList.remove('is-editor');
-  $('home').hidden = true;
-  $('review').hidden = false;
-  $('btn-new').hidden = false;
-  $('coach').hidden = false;
+  showMain('review');
   $('pane-progress').hidden = $('pane-overview').hidden = $('pane-editor').hidden = true;
   $('pane-moves').hidden = false;
   $('controls').hidden = false;

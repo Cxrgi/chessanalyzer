@@ -22,14 +22,41 @@
       <button class="btn ghost" id="btn-board">Analysebrett</button>
       <button class="btn ghost" id="btn-new" hidden>Start</button>
       <button class="icon-btn" id="btn-sound" title="Ton an/aus" aria-label="Ton an/aus"></button>
+      <button class="icon-btn" id="btn-logout" title="Abmelden" aria-label="Abmelden" hidden></button>
       <button class="icon-btn" id="btn-settings" title="Einstellungen" aria-label="Einstellungen"></button>
     </nav>
   </header>
 
-  <!-- Startseite ------------------------------------------------------------>
-  <main id="home" class="home">
+  <!-- Übersicht --------------------------------------------------------------->
+  <main id="hub" class="hub">
+    <header class="hub-head">
+      <p class="eyebrow">Dein Schachraum</p>
+      <h1>Was möchtest du tun?</h1>
+    </header>
+    <button type="button" class="continue" id="hub-continue" hidden></button>
+    <div class="tiles">
+      <button type="button" class="tile big" data-go="analyse"><span class="tile-ico" data-ico="search"></span><b>Partie analysieren</b><small>Link einer chess.com-Partie einfügen – der Coach erklärt jeden Zug.</small></button>
+      <button type="button" class="tile big" data-go="lektionen"><span class="tile-ico" data-ico="book"></span><b>Lektionen</b><small>Schach lernen – von den Regeln bis zum Endspiel.</small><span class="tile-prog" id="tile-prog"></span></button>
+      <button type="button" class="tile" data-go="brett"><span class="tile-ico" data-ico="grid"></span><b>Analysebrett</b><small>Frei für beide Seiten ziehen, die Engine zeigt den besten Zug.</small></button>
+      <button type="button" class="tile" data-go="editor"><span class="tile-ico" data-ico="edit"></span><b>Stellung aufbauen</b><small>Eigene Position festlegen und von dort aus spielen.</small></button>
+      <button type="button" class="tile" data-go="recent"><span class="tile-ico" data-ico="user"></span><b>Meine letzten Partien</b><small>Partien direkt aus deinem chess.com-Konto auswählen.</small></button>
+      <button type="button" class="tile" data-go="demo"><span class="tile-ico" data-ico="play"></span><b>Beispielpartie</b><small>Die berühmte Opernpartie mit Coach ansehen.</small></button>
+    </div>
+
+    <section class="list-card" id="history-card" hidden>
+      <header><h2>Zuletzt analysiert</h2></header>
+      <ul class="game-list" id="history-list"></ul>
+    </section>
+    <footer class="foot">
+      Nicht mit Chess.com verbunden. Engine: <a href="https://github.com/nmrugg/stockfish.js" target="_blank" rel="noopener">Stockfish</a> (GPL) ·
+      Die Analyse läuft komplett auf deinem Gerät.
+    </footer>
+  </main>
+
+  <!-- Partie laden ------------------------------------------------------------>
+  <main id="home" class="home" hidden>
     <section class="hero">
-      <p class="eyebrow">Kostenlos · ohne Anmeldung · läuft in deinem Browser</p>
+      <p class="eyebrow">Partie analysieren</p>
       <h1>Verstehe jede deiner Partien.</h1>
       <p class="lead">Füge den Link einer chess.com-Partie ein. Dein Coach geht sie Zug für Zug mit dir durch – mit Bewertungsleiste, besten Zügen und verständlichen Erklärungen.</p>
 
@@ -42,7 +69,7 @@
         <div class="load-row sub">
           <label for="user-input">Dein chess.com-Name</label>
           <input id="user-input" type="text" spellcheck="false" placeholder="optional" maxlength="40">
-          <span class="hint">Damit das Brett aus deiner Sicht steht und Links immer gefunden werden.</span>
+          <span class="hint">Damit das Brett aus deiner Sicht steht und du deine letzten Partien auswählen kannst.</span>
         </div>
         <p class="load-status" id="load-status" role="status" hidden></p>
       </form>
@@ -51,31 +78,22 @@
         Geht auch: <button class="link" id="btn-recent">meine letzten Partien anzeigen</button>,
         ein PGN einfügen oder die <button class="link" id="btn-demo">Beispielpartie</button> ansehen.
       </p>
-      <p class="alt-actions">
-        Oder frei analysieren: <button class="link" id="btn-board-home">Analysebrett öffnen</button> –
-        für beide Seiten ziehen, eigene Stellungen aufbauen und den besten Zug sehen.
-      </p>
     </section>
 
     <section class="list-card" id="games-card" hidden>
       <header><h2 id="games-title">Letzte Partien</h2><button class="icon-btn" id="games-close" aria-label="Schließen"></button></header>
       <ul class="game-list" id="games-list"></ul>
     </section>
+  </main>
 
-    <section class="list-card" id="history-card" hidden>
-      <header><h2>Zuletzt analysiert</h2></header>
-      <ul class="game-list" id="history-list"></ul>
-    </section>
-
-    <section class="features">
-      <article><span class="f-ico" id="f1"></span><h3>Jeder Zug bewertet</h3><p>Von „Brillant“ bis „Patzer“ – du siehst sofort, wo die Partie gekippt ist.</p></article>
-      <article><span class="f-ico" id="f2"></span><h3>Coach, der erklärt</h3><p>Warum war der Zug schlecht? Was wäre besser gewesen? In klaren Sätzen statt nur Zahlen.</p></article>
-      <article><span class="f-ico" id="f3"></span><h3>Selbst ausprobieren</h3><p>Fehler nochmal versuchen, eigene Varianten ziehen oder im Analysebrett jede Stellung aufbauen – Stockfish rechnet live mit.</p></article>
-    </section>
-    <footer class="foot">
-      Nicht mit Chess.com verbunden. Engine: <a href="https://github.com/nmrugg/stockfish.js" target="_blank" rel="noopener">Stockfish</a> (GPL) ·
-      Die Analyse läuft komplett auf deinem Gerät.
-    </footer>
+  <!-- Lektionen --------------------------------------------------------------->
+  <main id="lessons" class="lessons" hidden>
+    <header class="hub-head">
+      <p class="eyebrow">Lektionen</p>
+      <h1>Schach lernen, Schritt für Schritt.</h1>
+      <p class="lead" id="lessons-lead"></p>
+    </header>
+    <div id="lessons-list"></div>
   </main>
 
   <!-- Analyse ---------------------------------------------------------------->
@@ -146,6 +164,18 @@
         <div class="graph-wrap small"><svg id="graph-moves" class="graph" viewBox="0 0 400 60" preserveAspectRatio="none"></svg></div>
       </section>
 
+      <!-- Lektion -->
+      <section class="pane" id="pane-lesson" hidden>
+        <div class="ls-head"><span id="ls-course"></span><b id="ls-title"></b></div>
+        <div class="ls-dots" id="ls-dots"></div>
+        <p class="ls-count" id="ls-count"></p>
+        <div class="ls-nav">
+          <button type="button" class="btn ghost" id="ls-prev">Zurück</button>
+          <button type="button" class="btn soft" id="ls-next">Weiter</button>
+        </div>
+        <button type="button" class="link ls-all" id="ls-all">Alle Lektionen</button>
+      </section>
+
       <!-- Stellung aufbauen -->
       <section class="pane" id="pane-editor" hidden>
         <div class="palette" id="palette"></div>
@@ -188,6 +218,15 @@
       <h3>Analysetiefe</h3>
       <div class="seg" id="set-depth"></div>
       <p class="hint">Tiefer = genauer, dauert aber länger. Gilt ab der nächsten Analyse.</p>
+      <div id="pw-box" hidden>
+        <h3>Passwort ändern</h3>
+        <div class="pw-form">
+          <input type="password" id="pw-current" placeholder="Aktuelles Passwort" autocomplete="current-password">
+          <input type="password" id="pw-next" placeholder="Neues Passwort (mind. 6 Zeichen)" autocomplete="new-password">
+          <button type="button" class="btn soft small" id="pw-save">Speichern</button>
+        </div>
+        <p class="hint" id="pw-msg"></p>
+      </div>
     </form>
   </dialog>
 
