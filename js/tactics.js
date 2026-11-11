@@ -109,3 +109,52 @@ export function materialInfo(fen) {
     total: points('w') + points('b'),
   };
 }
+
+const DIRS = {
+  b: [[1, 1], [1, -1], [-1, 1], [-1, -1]],
+  r: [[1, 0], [-1, 0], [0, 1], [0, -1]],
+};
+DIRS.q = [...DIRS.b, ...DIRS.r];
+
+/**
+ * Fesselungen, die der Läufer/Turm/die Dame auf `square` ausübt:
+ * gegnerische Figur, hinter der auf derselben Linie König oder Dame steht.
+ * → [{ square, type, behind: 'k' | 'q' }]
+ */
+export function pinsBy(chess, square) {
+  const piece = chess.get(square);
+  if (!piece || !DIRS[piece.type]) return [];
+  const out = [];
+  const f0 = square.charCodeAt(0) - 97, r0 = +square[1] - 1;
+  for (const [df, dr] of DIRS[piece.type]) {
+    let first = null;
+    for (let f = f0 + df, r = r0 + dr; f >= 0 && f < 8 && r >= 0 && r < 8; f += df, r += dr) {
+      const sq = String.fromCharCode(97 + f) + (r + 1);
+      const p = chess.get(sq);
+      if (!p) continue;
+      if (!first) {
+        if (p.color === piece.color || p.type === 'k' || p.type === 'p') break;
+        first = { square: sq, type: p.type };
+        continue;
+      }
+      if (p.color !== piece.color) {
+        if (p.type === 'k') out.push({ ...first, behind: 'k' });
+        else if (p.type === 'q' && first.type !== 'q' && piece.type !== 'q') out.push({ ...first, behind: 'q' });
+      }
+      break;
+    }
+  }
+  return out;
+}
+
+/** Droht die Seite, die gerade gezogen hat, ein Matt in einem Zug? */
+export function mateThreat(fenAfter) {
+  const flipped = flipTurn(fenAfter);
+  if (!flipped) return false;
+  const chess = new Chess(flipped);
+  for (const m of chess.moves({ verbose: true })) {
+    if (!m.san.endsWith('#')) continue;
+    return true;
+  }
+  return false;
+}

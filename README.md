@@ -10,10 +10,13 @@ Nicht mit Chess.com verbunden. Die komplette Analyse läuft im Browser auf deine
 - **Partie laden** über einen chess.com-Link, über deinen Benutzernamen (Liste der letzten Partien) oder per PGN
 - **Jeder Zug bewertet**: Brillant, Großartig, Bester Zug, Ausgezeichnet, Gut, Buchzug, Ungenauigkeit, Fehler, Verpasste Chance, Patzer
 - **Bewertungsleiste**, Genauigkeit für beide Seiten, Bewertungsdiagramm, Eröffnungsname
-- **Coach**, der in Sätzen erklärt, was ein Zug bewirkt, warum er schlecht war und was besser gewesen wäre
+- **Coach**, der in Sätzen erklärt, was ein Zug bewirkt, warum er schlecht war und was besser gewesen wäre –
+  auf Wunsch aus deiner Sicht („Du …“), mit Fesselungen, Gabeln, Mattdrohungen und Abwicklungen
+- **Übersicht** mit Partiephasen, Schlüsselmomenten zum Anspringen und persönlichen Lernpunkten
+- Roter Pfeil auf dem Brett zeigt bei Fehlern, wie der Gegner sie bestraft
 - **„Bester Zug“** zeigt die Engine-Empfehlung samt Fortsetzung, **„Nochmal versuchen“** lässt dich den Fehler selbst korrigieren
 - **Eigene Varianten**: einfach Figuren ziehen, Stockfish rechnet live mit
-- Uhren, geschlagene Figuren, Brett drehen, Tastatursteuerung (← → Pos1 Ende F), Töne
+- Uhren, geschlagene Figuren, Brett drehen, Tastatursteuerung (← → Pos1 Ende, F = drehen, N = nächster Schlüsselmoment), Töne
 - Brettfarben und Figurensets wählbar, bereits analysierte Partien werden im Browser gespeichert
 
 ## Starten

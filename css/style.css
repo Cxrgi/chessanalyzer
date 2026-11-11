@@ -280,6 +280,16 @@ a { color: var(--accent); }
 .counts td.ico { width: 30px; text-align: center; }
 .counts td.ico svg { vertical-align: -4px; }
 .counts tr:hover td.lbl { color: var(--text); }
+.counts td.mid { text-align: center; }
+.ov-block:empty { display: none; }
+.ov-block h3 { margin: 4px 0 6px; font-size: .74rem; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); font-weight: 700; }
+.moment-list { display: flex; flex-direction: column; gap: 4px; }
+.moment { display: flex; align-items: center; gap: 8px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 9px; padding: 7px 10px; text-align: left; font-size: .93rem; }
+.moment:hover { background: var(--panel-2); border-color: #3c4759; }
+.moment span { margin-left: auto; color: var(--muted); font-size: .84rem; }
+.moment .cls-icon { flex: none; }
+.tip-list { margin: 0 0 6px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: .92rem; }
+.tip-list li { background: rgba(62, 207, 142, .08); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; padding: 7px 10px; }
 .opening { margin: 0; color: var(--muted); font-size: .9rem; }
 .opening b { color: var(--text); font-weight: 600; }
 

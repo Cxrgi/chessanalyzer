@@ -3,7 +3,7 @@ import { Chess } from '../vendor/chess.js';
 import { Board } from './board.js';
 import { AnalysisPool, LiveEngine } from './engine.js';
 import { reviewGame, winPct, evalText, CLASSES, CLASS_ORDER, BAD } from './analysis.js';
-import { explainMove, summarize, resultText, describeMove, pvToMoves, lineText, sanDe } from './coach.js';
+import { explainMove, summarize, resultText, describeMove, pvToMoves, lineText, sanDe, say } from './coach.js';
 import { parseGameLink, loadByLink, gameFromPgn, gameFromArchive, fetchRecentGames, fetchAvatar, LoadError } from './chesscom.js';
 import { materialInfo } from './tactics.js';
 import { classIcon, uiIcon } from './icons.js';
@@ -62,6 +62,7 @@ const S = {
   retry: null,
   live: null,
   orientation: 'w',
+  you: null, // 'w' | 'b' – welche Seite der Nutzer gespielt hat
   pool: null,
   book: null,
   hoverArrow: null,
@@ -95,6 +96,7 @@ function buildStaticIcons() {
   $('ctl-next').innerHTML = uiIcon('next', 22);
   $('ctl-last').innerHTML = uiIcon('last', 20);
   $('ctl-flip').innerHTML = uiIcon('flip', 20);
+  $('ctl-key').innerHTML = uiIcon('star', 20);
   $('f1').innerHTML = ['brilliant', 'best', 'blunder'].map((c) => classIcon(c, 26)).join('');
   $('f2').innerHTML = classIcon('great', 26) + classIcon('book', 26);
   $('f3').innerHTML = classIcon('excellent', 26) + classIcon('miss', 26);
@@ -185,6 +187,11 @@ function bindEvents() {
   $('ctl-next').onclick = next;
   $('ctl-last').onclick = () => go(S.game.moves.length);
   $('ctl-flip').onclick = flip;
+  $('ctl-key').onclick = nextKey;
+  $('moments').addEventListener('click', (e) => {
+    const b = e.target.closest('.moment');
+    if (b) { showMoves(); go(+b.dataset.ply); }
+  });
 
   $('moves').addEventListener('click', (e) => {
     const b = e.target.closest('.mv');
@@ -226,6 +233,7 @@ function bindEvents() {
     else if (e.key === 'Home' || e.key === 'ArrowUp') go(0);
     else if (e.key === 'End' || e.key === 'ArrowDown') go(S.game.moves.length);
     else if (e.key.toLowerCase() === 'f') flip();
+    else if (e.key.toLowerCase() === 'n' && S.view === 'moves') nextKey();
     else return;
     e.preventDefault();
   });
@@ -439,7 +447,8 @@ async function startGame(game, cached) {
   S.ply = 0;
   S.view = 'analyzing';
   const me = S.username.toLowerCase();
-  S.orientation = me && game.black.name.toLowerCase() === me ? 'b' : 'w';
+  S.you = !me ? null : game.white.name.toLowerCase() === me ? 'w' : game.black.name.toLowerCase() === me ? 'b' : null;
+  S.orientation = S.you === 'b' ? 'b' : 'w';
   board.setOrientation(S.orientation);
 
   $('home').hidden = true;
@@ -520,7 +529,7 @@ async function loadAvatars(game) {
   }
 }
 
-const ctx = () => ({ game: S.game, positions: S.review.positions, review: S.review });
+const ctx = () => ({ game: S.game, positions: S.review.positions, review: S.review, you: S.you });
 
 // ---------------------------------------------------------------------------
 // Ansichten
@@ -535,16 +544,37 @@ function showOverview() {
   $('controls').hidden = true;
   S.ply = S.game.moves.length;
   board.setInteractive(false);
+  S.summary = summarize(ctx());
   renderOverview();
   renderBoard(false);
   renderPlayers();
   renderEvalBar(S.review.evals[S.ply]);
-  const sum = summarize(ctx());
-  setCoach({
-    title: 'Partie analysiert!',
-    paragraphs: [sum.text, sum.keyText].filter(Boolean),
-    actions: sum.keyPly ? [{ label: 'Zum Wendepunkt', icon: 'star', run: () => { showMoves(); go(sum.keyPly); } }] : [],
-  });
+  const sum = S.summary;
+  const actions = sum.keyPly ? [{ label: 'Zum Wendepunkt', icon: 'star', run: () => { showMoves(); go(sum.keyPly); } }] : [];
+  const paragraphs = [sum.text, sum.keyText].filter(Boolean);
+  if (!S.you) {
+    paragraphs.push('Welche Seite warst du? Dann erkläre ich alles aus deiner Sicht.');
+    actions.push({ label: `Ich war ${short(S.game.white.name)}`, run: () => setYou('w') });
+    actions.push({ label: `Ich war ${short(S.game.black.name)}`, run: () => setYou('b') });
+  }
+  setCoach({ title: 'Partie analysiert!', paragraphs, actions });
+}
+
+const short = (name) => (name.length > 16 ? name.slice(0, 15) + '…' : name);
+
+/** Merkt sich, welche Seite der Nutzer gespielt hat – der Coach spricht ihn dann direkt an. */
+function setYou(color) {
+  S.you = color;
+  const p = color === 'w' ? S.game.white : S.game.black;
+  if (S.game.url && /chess\.com/.test(S.game.url)) {
+    S.username = p.name;
+    store.set('username', p.name);
+    $('user-input').value = p.name;
+  }
+  S.orientation = color;
+  board.setOrientation(color);
+  S.review.diag = null;
+  showOverview();
 }
 
 function showMoves() {
@@ -574,6 +604,14 @@ function renderOverview() {
       <td class="ico">${classIcon(c, 20)}</td><td class="lbl">${CLASSES[c].label}</td>
       <td class="n ${b ? '' : 'zero'}" style="color:${color}">${b}</td></tr>`;
   }).join('');
+  const sum = S.summary;
+  const phaseRows = sum.phases.filter((r) => r.w || r.b);
+  $('phases').innerHTML = phaseRows.length ? `<h3>Partiephasen</h3><table class="counts">${phaseRows.map((r) =>
+    `<tr><td class="n">${r.w ? classIcon(r.w, 20) : '–'}</td><td class="lbl mid">${r.name}</td><td class="n">${r.b ? classIcon(r.b, 20) : '–'}</td></tr>`).join('')}</table>` : '';
+  $('moments').innerHTML = sum.moments.length ? `<h3>Schlüsselmomente</h3><div class="moment-list">${sum.moments.map((m) =>
+    `<button type="button" class="moment" data-ply="${m.ply}">${classIcon(m.cls, 18)}<b>${esc(m.label)}</b><span>${CLASSES[m.cls].label}</span></button>`).join('')}</div>` : '';
+  $('tips').innerHTML = sum.tips.map((t) =>
+    `<h3>${S.you ? esc(t.who) : 'Lernpunkte · ' + esc(t.who)}</h3><ul class="tip-list">${t.items.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>`).join('');
   const op = review.opening ? review.opening.name : game.openingHint;
   $('opening-line').innerHTML = (op ? `Eröffnung: <b>${esc(op)}</b>` : '')
     + (game.date ? `${op ? ' · ' : ''}${esc(game.date.split('-').reverse().join('.'))}` : '')
@@ -656,6 +694,21 @@ function prev() {
     return;
   }
   go(S.ply - 1);
+}
+
+const KEY_CLASSES = new Set(['brilliant', 'great', 'mistake', 'miss', 'blunder']);
+
+/** Springt zum nächsten Schlüsselmoment (Fehler, verpasste Chance, starker Zug). */
+function nextKey() {
+  const n = S.game.moves.length;
+  const from = S.retry ? S.retry.k + 1 : S.variation ? S.variation.returnPly : S.ply;
+  for (let k = from; k < n; k++) {
+    if (KEY_CLASSES.has(S.review.moves[k].cls)) {
+      go(k + 1);
+      return;
+    }
+  }
+  go(n);
 }
 
 function flip() {
@@ -856,7 +909,7 @@ async function retryMove(mv) {
 
   if (best && mv.uci === best.move) {
     const what = describeMove(S.game.fens[k], mv, k > 0 ? S.game.moves[k - 1] : null, k);
-    solve(`Genau! **${sanDe(mv.san)}** ist der beste Zug.` + (what ? ` ${SIDE[mv.color]} ${what}.` : ''), true);
+    solve(`Genau! **${sanDe(mv.san)}** ist der beste Zug.` + (what ? ` ${say(ctx(), mv.color, what)}.` : ''), true);
     return;
   }
   if (mv.uci === played.uci) {
@@ -934,6 +987,11 @@ function renderBoard(animate) {
     const color = cls ? tint(CLASSES[cls].color, 0.6) : YELLOW;
     decor.squares.push({ square: m.from, color }, { square: m.to, color });
     if (cls) decor.badge = { square: m.to, cls };
+    // Bei Fehlern und Patzern die Bestrafung als roten Pfeil zeigen
+    const reply = review.positions[S.ply].lines[0];
+    if ((cls === 'mistake' || cls === 'blunder') && reply) {
+      decor.arrows.push({ from: reply.move.slice(0, 2), to: reply.move.slice(2, 4), color: CLASSES.blunder.color, opacity: 0.75 });
+    }
   }
   if (S.hoverArrow && !S.retry) {
     decor.arrows.push({ from: S.hoverArrow.slice(0, 2), to: S.hoverArrow.slice(2, 4), color: '#f7a531' });
@@ -1038,7 +1096,7 @@ function renderCoach() {
   if (S.retry) {
     const r = S.retry;
     const k = r.k;
-    const side = SIDE[game.moves[k].color];
+    const side = S.you === game.moves[k].color ? 'Du bist' : `${SIDE[game.moves[k].color]} ist`;
     if (r.state === 'solved') {
       setCoach({
         cls: r.exact ? 'best' : 'excellent',
@@ -1055,7 +1113,7 @@ function renderCoach() {
     const piece = best ? new Chess(game.fens[k]).get(best.move.slice(0, 2)) : null;
     const names = { p: 'einem Bauern', n: 'dem Springer', b: 'dem Läufer', r: 'dem Turm', q: 'der Dame', k: 'dem König' };
     setCoach({
-      title: `${side} ist am Zug – finde etwas Besseres als ${sanDe(game.moves[k].san)}!`,
+      title: `${side} am Zug – finde etwas Besseres als ${sanDe(game.moves[k].san)}!`,
       paragraphs: [r.feedback || (r.hint && piece ? `Tipp: Zieh mit ${names[piece.type]}.` : 'Zieh eine Figur auf dem Brett.')],
       actions: [
         { label: 'Tipp', icon: 'bulb', run: () => { r.hint = true; r.feedback = null; render(); } },
@@ -1073,7 +1131,7 @@ function renderCoach() {
       const what = describeMove(game.fens[v.basePly], m, v.basePly > 0 ? game.moves[v.basePly - 1] : null, v.basePly);
       const paragraphs = [];
       if (v.idx <= 1) {
-        paragraphs.push(what ? `${SIDE[m.color]} ${what}.` : 'Das ist die erste Wahl der Engine.');
+        paragraphs.push(what ? `${say(ctx(), m.color, what)}.` : 'Das ist die erste Wahl der Engine.');
         if (v.moves.length > 1) paragraphs.push(`So könnte es weitergehen: ${lineText(game.fens[v.basePly], v.moves.slice(0, 6))}. Mit → spielst du die Züge durch.`);
       } else {
         paragraphs.push(`Fortsetzung der Engine: ${lineText(game.fens[v.basePly], v.moves.slice(0, v.idx))}`);
@@ -1131,7 +1189,8 @@ function renderCoach() {
     setCoach({
       title: 'Los geht’s!',
       paragraphs: [
-        `${game.white.name} (Weiß) gegen ${game.black.name} (Schwarz).`,
+        S.you ? `Du spielst mit ${SIDE[S.you]} gegen ${S.you === 'w' ? game.black.name : game.white.name}.`
+          : `${game.white.name} (Weiß) gegen ${game.black.name} (Schwarz).`,
         'Geh mit „Weiter“ oder den Pfeiltasten Zug für Zug durch die Partie. Du kannst jederzeit selbst Züge auf dem Brett ausprobieren.',
       ],
       actions: [{ label: 'Weiter', icon: 'arrow', primary: true, run: next }],
