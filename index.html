@@ -19,7 +19,8 @@
       <span>Chess<b>Analyzer</b></span>
     </a>
     <nav class="topbar-actions">
-      <button class="btn ghost" id="btn-new" hidden>Neue Partie</button>
+      <button class="btn ghost" id="btn-board">Analysebrett</button>
+      <button class="btn ghost" id="btn-new" hidden>Start</button>
       <button class="icon-btn" id="btn-sound" title="Ton an/aus" aria-label="Ton an/aus"></button>
       <button class="icon-btn" id="btn-settings" title="Einstellungen" aria-label="Einstellungen"></button>
     </nav>
@@ -50,6 +51,10 @@
         Geht auch: <button class="link" id="btn-recent">meine letzten Partien anzeigen</button>,
         ein PGN einfügen oder die <button class="link" id="btn-demo">Beispielpartie</button> ansehen.
       </p>
+      <p class="alt-actions">
+        Oder frei analysieren: <button class="link" id="btn-board-home">Analysebrett öffnen</button> –
+        für beide Seiten ziehen, eigene Stellungen aufbauen und den besten Zug sehen.
+      </p>
     </section>
 
     <section class="list-card" id="games-card" hidden>
@@ -65,7 +70,7 @@
     <section class="features">
       <article><span class="f-ico" id="f1"></span><h3>Jeder Zug bewertet</h3><p>Von „Brillant“ bis „Patzer“ – du siehst sofort, wo die Partie gekippt ist.</p></article>
       <article><span class="f-ico" id="f2"></span><h3>Coach, der erklärt</h3><p>Warum war der Zug schlecht? Was wäre besser gewesen? In klaren Sätzen statt nur Zahlen.</p></article>
-      <article><span class="f-ico" id="f3"></span><h3>Selbst ausprobieren</h3><p>Fehler nochmal versuchen, eigene Varianten ziehen – Stockfish rechnet live mit.</p></article>
+      <article><span class="f-ico" id="f3"></span><h3>Selbst ausprobieren</h3><p>Fehler nochmal versuchen, eigene Varianten ziehen oder im Analysebrett jede Stellung aufbauen – Stockfish rechnet live mit.</p></article>
     </section>
     <footer class="foot">
       Nicht mit Chess.com verbunden. Engine: <a href="https://github.com/nmrugg/stockfish.js" target="_blank" rel="noopener">Stockfish</a> (GPL) ·
@@ -128,10 +133,36 @@
 
       <!-- Zug für Zug -->
       <section class="pane" id="pane-moves" hidden>
+        <div class="board-tools" id="board-tools" hidden>
+          <button type="button" class="btn soft small" id="bt-edit">Stellung bearbeiten</button>
+          <button type="button" class="btn soft small" id="bt-reset">Neu</button>
+          <button type="button" class="btn soft small" id="bt-fen">FEN kopieren</button>
+          <button type="button" class="btn soft small" id="bt-pgn">PGN kopieren</button>
+          <label class="toggle"><input type="checkbox" id="bt-arrow" checked> Besten Zug als Pfeil zeigen</label>
+        </div>
         <div class="variation" id="variation" hidden></div>
         <div class="lines" id="lines"></div>
         <div class="moves" id="moves" tabindex="-1"></div>
         <div class="graph-wrap small"><svg id="graph-moves" class="graph" viewBox="0 0 400 60" preserveAspectRatio="none"></svg></div>
+      </section>
+
+      <!-- Stellung aufbauen -->
+      <section class="pane" id="pane-editor" hidden>
+        <div class="palette" id="palette"></div>
+        <div class="ed-row"><span class="ed-label">Am Zug</span><div class="seg two" id="ed-turn"></div></div>
+        <div class="ed-row"><span class="ed-label">Rochade</span><div class="ed-castle" id="ed-castle"></div></div>
+        <div class="ed-row wrap">
+          <button type="button" class="btn soft small" id="ed-start">Grundstellung</button>
+          <button type="button" class="btn soft small" id="ed-clear">Leeres Brett</button>
+          <button type="button" class="btn soft small" id="ed-flip">Brett drehen</button>
+        </div>
+        <label class="ed-label" for="ed-fen">FEN (zum Einfügen oder Kopieren)</label>
+        <div class="ed-row"><input id="ed-fen" type="text" spellcheck="false" autocomplete="off"><button type="button" class="btn soft small" id="ed-copy">Kopieren</button></div>
+        <p class="ed-error" id="ed-error" hidden></p>
+        <div class="ed-row end">
+          <button type="button" class="btn ghost" id="ed-cancel">Abbrechen</button>
+          <button type="button" class="btn primary" id="ed-go">Von hier spielen</button>
+        </div>
       </section>
 
       <footer class="controls" id="controls" hidden>

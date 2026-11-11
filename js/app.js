@@ -1,5 +1,6 @@
 // Hauptlogik: Partie laden → analysieren → Übersicht → Zug für Zug mit Coach.
 import { Chess } from '../vendor/chess.js';
+import { openEditor, bindEditor } from './editor.js';
 import { Board } from './board.js';
 import { AnalysisPool, LiveEngine } from './engine.js';
 import { reviewGame, winPct, evalText, CLASSES, CLASS_ORDER, BAD } from './analysis.js';
@@ -14,6 +15,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const md = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
 const SIDE = { w: 'Weiß', b: 'Schwarz' };
+const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
 const THEMES = {
   green: { name: 'Grün', light: '#ebecd0', dark: '#739552' },
@@ -55,6 +57,7 @@ const S = {
   settings: { theme: 'green', pieces: 'cburnett', depth: 16, sound: true, ...store.get('settings', {}) },
   username: store.get('username', ''),
   view: 'home',
+  mode: null, // 'game' = Partieanalyse, 'board' = freies Analysebrett
   game: null,
   review: null,
   ply: 0,
@@ -83,6 +86,7 @@ function init() {
   bindEvents();
   renderHistory();
   $('user-input').value = S.username;
+  bindEditor({ board, $, setCoach, uiIcon, copyText, pieceSet: () => S.settings.pieces, onPlay: (fen) => openBoard(fen), onCancel: closeEditor });
   routeFromHash();
   watchHostBadge();
 }
@@ -191,6 +195,17 @@ function bindEvents() {
   };
   $('games-close').onclick = () => { $('games-card').hidden = true; };
   $('btn-new').onclick = goHome;
+  $('btn-board').onclick = () => openBoard(S.mode === 'game' && S.view === 'moves' ? currentFen() : null);
+  $('btn-board-home').onclick = () => openBoard();
+  $('bt-edit').onclick = () => showEditor(currentFen());
+  $('bt-reset').onclick = () => openBoard(START_FEN);
+  $('bt-fen').onclick = (e) => copyText(currentFen(), e.currentTarget);
+  $('bt-pgn').onclick = (e) => copyText(boardPgn(), e.currentTarget);
+  $('bt-arrow').checked = store.get('boardArrow', true);
+  $('bt-arrow').onchange = (e) => {
+    store.set('boardArrow', e.target.checked);
+    renderBoard(false);
+  };
   $('brand').onclick = (e) => { e.preventDefault(); goHome(); };
   $('btn-sound').onclick = () => {
     S.settings.sound = !S.settings.sound;
@@ -200,10 +215,10 @@ function bindEvents() {
   $('btn-cancel').onclick = goHome;
   $('btn-start').onclick = () => { showMoves(); go(0); };
   $('ctl-overview').onclick = showOverview;
-  $('ctl-first').onclick = () => go(0);
+  $('ctl-first').onclick = () => (S.mode === 'board' ? boardGo(0) : go(0));
   $('ctl-prev').onclick = prev;
   $('ctl-next').onclick = next;
-  $('ctl-last').onclick = () => go(S.game.moves.length);
+  $('ctl-last').onclick = () => (S.mode === 'board' ? boardGo(Infinity) : go(S.game.moves.length));
   $('ctl-flip').onclick = flip;
   $('ctl-key').onclick = nextKey;
   $('moments').addEventListener('click', (e) => {
@@ -213,7 +228,9 @@ function bindEvents() {
 
   $('moves').addEventListener('click', (e) => {
     const b = e.target.closest('.mv');
-    if (b) go(+b.dataset.ply);
+    if (!b) return;
+    if (S.mode === 'board') boardGo(+b.dataset.ply);
+    else go(+b.dataset.ply);
   });
   for (const id of ['graph-overview', 'graph-moves']) {
     $(id).parentElement.addEventListener('click', (e) => {
@@ -248,10 +265,10 @@ function bindEvents() {
     if (e.key === 'ArrowRight') {
       if (S.view === 'overview') { showMoves(); go(0); } else next();
     } else if (e.key === 'ArrowLeft') prev();
-    else if (e.key === 'Home' || e.key === 'ArrowUp') go(0);
-    else if (e.key === 'End' || e.key === 'ArrowDown') go(S.game.moves.length);
+    else if (e.key === 'Home' || e.key === 'ArrowUp') $('ctl-first').click();
+    else if (e.key === 'End' || e.key === 'ArrowDown') $('ctl-last').click();
     else if (e.key.toLowerCase() === 'f') flip();
-    else if (e.key.toLowerCase() === 'n' && S.view === 'moves') nextKey();
+    else if (e.key.toLowerCase() === 'n' && S.view === 'moves' && S.mode === 'game') nextKey();
     else return;
     e.preventDefault();
   });
@@ -410,6 +427,10 @@ async function routeFromHash() {
     if (S.view !== 'home') goHome(true);
     return;
   }
+  if (id === 'brett') {
+    if (S.mode !== 'board') openBoard();
+    return;
+  }
   if (S.game && S.game.id === id) return;
   const cached = store.get('g.' + id, null);
   if (cached && cached.game && cached.positions) {
@@ -431,6 +452,12 @@ function goHome(fromHash) {
   S.pool = null;
   live.stop();
   S.view = 'home';
+  S.mode = null;
+  S.live = null;
+  board.setEditor(null);
+  document.querySelector('.panel').classList.remove('is-editor');
+  $('pane-editor').hidden = true;
+  $('coach').hidden = false;
   S.game = S.review = S.variation = S.retry = null;
   $('review').hidden = true;
   $('home').hidden = false;
@@ -460,6 +487,13 @@ async function startGame(game, cached) {
   if (S.pool) S.pool.cancel();
   live.stop();
   S.game = game;
+  S.mode = 'game';
+  board.setEditor(null);
+  document.querySelector('.panel').classList.remove('is-editor');
+  $('pane-editor').hidden = true;
+  $('board-tools').hidden = true;
+  $('ctl-overview').hidden = $('ctl-key').hidden = false;
+  $('graph-moves').parentElement.hidden = false;
   S.review = null;
   S.variation = S.retry = null;
   S.ply = 0;
@@ -651,7 +685,7 @@ function currentFen() {
 function currentEval() {
   const v = S.variation;
   if (S.retry) return S.review.evals[S.retry.k];
-  if (!v || v.idx === 0) return S.review.evals[v ? v.basePly : S.ply];
+  if (!v || (v.idx === 0 && S.mode !== 'board')) return S.review.evals[v ? v.basePly : S.ply];
   if (S.live && S.live.fen === currentFen()) {
     if (S.live.terminal) return S.live.terminal.eval;
     if (S.live.lines[0]) return S.live.lines[0].eval;
@@ -681,6 +715,10 @@ function go(ply, { sound = false } = {}) {
 }
 
 function next() {
+  if (S.mode === 'board') {
+    boardGo(S.variation.idx + 1, true);
+    return;
+  }
   if (S.retry) return;
   const v = S.variation;
   if (v) {
@@ -696,6 +734,10 @@ function next() {
 }
 
 function prev() {
+  if (S.mode === 'board') {
+    boardGo(S.variation.idx - 1);
+    return;
+  }
   if (S.retry) {
     go(S.retry.k + 1);
     return;
@@ -781,18 +823,20 @@ function onUserMove({ from, to, promotion }) {
     return;
   }
   if (!v) {
-    S.variation = { basePly: S.ply, returnPly: S.ply, moves: [], idx: 0, source: 'user', evals: [S.review.evals[S.ply]], lines: [] };
+    S.variation = { basePly: S.ply, returnPly: S.ply, moves: [], idx: 0, source: 'user', evals: [S.review.evals[S.ply]], lines: [], judged: [] };
   }
   const cur = S.variation;
-  cur.source = 'user';
+  if (cur.source !== 'board') cur.source = 'user';
   cur.moves.length = cur.idx;
   cur.evals.length = cur.idx + 1;
   cur.lines.length = cur.idx + 1;
+  cur.judged.length = cur.idx + 1;
   cur.moves.push(mv);
   cur.idx++;
   playSound(soundFor(mv));
   startLive();
   render();
+  if (S.mode === 'board') saveBoard();
 }
 
 /** Spielt eine Engine-Linie der aktuellen Stellung als Variante an. */
@@ -808,15 +852,17 @@ function playLine(i) {
     v.moves.length = v.idx;
     v.evals.length = v.idx + 1;
     v.lines.length = v.idx + 1;
-    v.moves.push(...moves);
+    v.judged.length = v.idx + 1;
+    v.moves.push(...(S.mode === 'board' ? moves.slice(0, 1) : moves));
     v.idx++;
-    v.source = 'user';
+    if (v.source !== 'board') v.source = 'user';
   } else {
-    S.variation = { basePly: S.ply, returnPly: S.ply, moves, idx: 1, source: 'user', evals: [S.review.evals[S.ply]], lines: [] };
+    S.variation = { basePly: S.ply, returnPly: S.ply, moves, idx: 1, source: 'user', evals: [S.review.evals[S.ply]], lines: [], judged: [] };
   }
   playSound(soundFor(moves[0]));
   startLive();
   render();
+  if (S.mode === 'board') saveBoard();
 }
 
 function showBest(k) {
@@ -826,7 +872,7 @@ function showBest(k) {
   if (!moves.length) return;
   live.stop();
   S.retry = null;
-  S.variation = { basePly: k, returnPly: k + 1, moves, idx: 0, source: 'best', evals: [S.review.evals[k]], lines: [], intro: true };
+  S.variation = { basePly: k, returnPly: k + 1, moves, idx: 0, source: 'best', evals: [S.review.evals[k]], lines: [], judged: [], intro: true };
   render();
   const v = S.variation;
   setTimeout(() => {
@@ -842,7 +888,7 @@ function showBest(k) {
 let liveTimer = null;
 function startLive() {
   const v = S.variation;
-  if (!v || v.idx === 0) {
+  if (!v || (v.idx === 0 && S.mode !== 'board')) {
     live.stop();
     S.live = null;
     return;
@@ -852,7 +898,7 @@ function startLive() {
   const state = { fen, lines: [], terminal: null };
   S.live = state;
   live.analyze(fen, {
-    depth: 18,
+    depth: S.mode === 'board' ? 22 : 18,
     onUpdate: (lines, terminal) => {
       if (S.live !== state) return;
       state.lines = lines;
@@ -869,6 +915,10 @@ function startLive() {
             renderEvalBar(currentEval());
             renderLines();
             renderCoach();
+            if (S.mode === 'board') {
+              board.setDecor(boardDecor());
+              refreshMoveIcons();
+            }
           }
         }, 120);
       }
@@ -879,7 +929,7 @@ function startLive() {
 function currentLines() {
   const v = S.variation;
   if (S.retry) return [];
-  if (v && v.idx > 0) return S.live && S.live.fen === currentFen() ? S.live.lines : [];
+  if (v && (v.idx > 0 || S.mode === 'board')) return S.live && S.live.fen === currentFen() ? S.live.lines : [];
   return S.review.positions[v ? v.basePly : S.ply].lines;
 }
 
@@ -960,6 +1010,7 @@ async function retryMove(mv) {
 // ---------------------------------------------------------------------------
 
 function render() {
+  if (S.mode === 'board') buildBoardMoveList();
   renderBoard(true);
   renderPlayers();
   renderEvalBar(currentEval());
@@ -977,10 +1028,28 @@ const tint = (hex, a) => {
 const YELLOW = 'rgba(255, 235, 59, .5)';
 
 function renderBoard(animate) {
+  board.setPosition(currentFen(), { animate });
+  board.setDecor(boardDecor());
+}
+
+/** Markierungen, Pfeile und Bewertungs-Symbol für die aktuelle Stellung. */
+function boardDecor() {
   const { game, review } = S;
   const decor = { squares: [], arrows: [] };
   const v = S.variation;
-  if (S.retry) {
+  if (S.mode === 'board') {
+    if (v.idx > 0) {
+      const m = v.moves[v.idx - 1];
+      const j = judgeMove(v, v.idx);
+      const color = j ? tint(CLASSES[j.cls].color, 0.6) : tint('#5c8bb0', 0.55);
+      decor.squares.push({ square: m.from, color }, { square: m.to, color });
+      if (j) decor.badge = { square: m.to, cls: j.cls };
+    }
+    const best = S.live && S.live.fen === currentFen() && S.live.lines[0];
+    if (best && $('bt-arrow').checked) {
+      decor.arrows.push({ from: best.move.slice(0, 2), to: best.move.slice(2, 4), color: CLASSES.best.color, opacity: 0.8 });
+    }
+  } else if (S.retry) {
     const r = S.retry;
     if (r.userMove && r.shownFen) {
       const color = r.state === 'solved' ? tint(CLASSES.best.color, 0.6) : r.state === 'wrong' ? tint(CLASSES.blunder.color, 0.55) : YELLOW;
@@ -1014,8 +1083,7 @@ function renderBoard(animate) {
   if (S.hoverArrow && !S.retry) {
     decor.arrows.push({ from: S.hoverArrow.slice(0, 2), to: S.hoverArrow.slice(2, 4), color: '#f7a531' });
   }
-  board.setPosition(currentFen(), { animate });
-  board.setDecor(decor);
+  return decor;
 }
 
 function fmtClock(sec) {
@@ -1142,6 +1210,11 @@ function renderCoach() {
     return;
   }
 
+  if (S.mode === 'board') {
+    renderBoardCoach();
+    return;
+  }
+
   if (v) {
     const ev = currentEval();
     if (v.source === 'best') {
@@ -1179,18 +1252,8 @@ function renderCoach() {
     } else if (!done || !after) {
       paragraphs.push('Die Engine rechnet …');
     } else {
-      // Vergleich möglichst innerhalb derselben Engine-Suche (sonst schwanken die Werte)
-      const prevLines = v.idx === 1 ? review.positions[v.basePly].lines : (v.lines[v.idx - 1] || []);
-      const hit = prevLines.find((l) => l.move === m.uci);
-      const sign = m.color === 'w' ? 1 : -1;
-      let loss = null;
-      if (hit) loss = sign * (winPct(prevLines[0].eval) - winPct(hit.eval));
-      else if (before) loss = sign * (winPct(before) - winPct(after));
-      if (loss != null) {
-        const verdict = hit === prevLines[0] ? 'Das ist der beste Zug!' : loss <= 2 ? 'Ein starker Zug!' : loss <= 5 ? 'Ein guter Zug.'
-          : loss <= 10 ? 'Etwas ungenau.' : loss <= 20 ? 'Das ist ein Fehler.' : 'Das ist ein Patzer.';
-        paragraphs.push(`**${sanDe(m.san)}**: ${verdict}`);
-      }
+      const j = judgeMove(v, v.idx);
+      if (j) paragraphs.push(`**${sanDe(m.san)}**: ${JUDGE_TEXT[j.cls]}`);
       const reply = pvToMoves(currentFen(), S.live.lines[0].pv, 1)[0];
       if (reply) paragraphs.push(`Die beste Antwort ist **${sanDe(reply.san)}**.`);
     }
@@ -1254,7 +1317,7 @@ function renderLines() {
 function renderVariationBar() {
   const el = $('variation');
   const v = S.variation;
-  if (!v || v.source !== 'user') {
+  if (!v || v.source !== 'user' || S.mode === 'board') {
     el.hidden = true;
     return;
   }
@@ -1291,7 +1354,7 @@ function buildMoveList() {
 function highlightMove() {
   const box = $('moves');
   box.querySelectorAll('.mv.active').forEach((el) => el.classList.remove('active'));
-  const ply = S.retry ? S.retry.k + 1 : S.variation ? S.variation.returnPly : S.ply;
+  const ply = S.mode === 'board' ? S.variation.idx : S.retry ? S.retry.k + 1 : S.variation ? S.variation.returnPly : S.ply;
   const el = box.querySelector(`.mv[data-ply="${ply}"]`);
   if (el) {
     el.classList.add('active');
@@ -1305,7 +1368,7 @@ function highlightMove() {
 }
 
 function renderGraphs() {
-  if (!S.review) return;
+  if (!S.review || S.mode === 'board') return;
   drawGraph($('graph-overview'));
   drawGraph($('graph-moves'));
 }
@@ -1330,6 +1393,241 @@ function drawGraph(svg) {
   const ply = S.view === 'overview' ? null : (S.retry ? S.retry.k + 1 : S.variation ? S.variation.returnPly : S.ply);
   const cursor = ply == null ? '' : `<line x1="${x(ply).toFixed(1)}" x2="${x(ply).toFixed(1)}" y1="0" y2="${H}" stroke="#3ecf8e" stroke-width="2"/>`;
   svg.innerHTML = `<path d="${d}" fill="#f4f5f6"/><line x1="0" x2="${W}" y1="${H / 2}" y2="${H / 2}" stroke="rgba(128,128,128,.55)" stroke-width="1"/>${marks}${cursor}`;
+}
+
+// ---------------------------------------------------------------------------
+// Analysebrett: frei für beide Seiten ziehen, Engine rechnet live mit
+// ---------------------------------------------------------------------------
+
+const JUDGE_TEXT = {
+  best: 'Das ist der beste Zug!',
+  excellent: 'Ein starker Zug!',
+  good: 'Ein guter Zug.',
+  inaccuracy: 'Etwas ungenau.',
+  mistake: 'Das ist ein Fehler.',
+  blunder: 'Das ist ein Patzer.',
+};
+
+/**
+ * Bewertet den Zug, der in einer Variante zu Stellung `idx` führt.
+ * Verglichen wird möglichst innerhalb derselben Engine-Suche, sonst schwanken die Werte.
+ */
+function judgeMove(v, idx) {
+  if (v.judged[idx]) return v.judged[idx];
+  const m = v.moves[idx - 1];
+  const sign = m.color === 'w' ? 1 : -1;
+  const prevLines = idx === 1 && S.mode !== 'board' ? S.review.positions[v.basePly].lines : (v.lines[idx - 1] || []);
+  const hit = prevLines.find((l) => l.move === m.uci);
+  const here = S.live && S.live.fen === m.fen ? S.live : null;
+  const settled = here && (here.terminal || (here.lines[0] && here.lines[0].depth >= 12));
+  let cls = null;
+  if (here && here.terminal && here.terminal.terminal === 'mate') cls = 'best';
+  else if (hit === prevLines[0] && hit) cls = 'best';
+  else {
+    let loss = null;
+    if (hit) loss = sign * (winPct(prevLines[0].eval) - winPct(hit.eval));
+    else if (settled && v.evals[idx - 1] && v.evals[idx]) loss = sign * (winPct(v.evals[idx - 1]) - winPct(v.evals[idx]));
+    if (loss == null) return null;
+    cls = loss <= 2 ? 'excellent' : loss <= 5 ? 'good' : loss <= 10 ? 'inaccuracy' : loss <= 20 ? 'mistake' : 'blunder';
+  }
+  v.judged[idx] = { cls, best: prevLines[0] && prevLines[0] !== hit ? prevLines[0].move : null };
+  return v.judged[idx];
+}
+
+function boardState() {
+  const v = S.variation;
+  return { startFen: S.game.startFen, ucis: v.moves.map((m) => m.uci), idx: v.idx };
+}
+
+function saveBoard() {
+  store.set('board', boardState());
+}
+
+/** Öffnet das Analysebrett – mit einer Stellung oder dem zuletzt gespeicherten Stand. */
+function openBoard(fen, ucis = [], idx = null) {
+  if (S.pool) S.pool.cancel();
+  S.pool = null;
+  live.stop();
+  if (!fen) {
+    const saved = store.get('board', null);
+    if (saved && saved.startFen) ({ startFen: fen, ucis, idx } = saved);
+  }
+  let start;
+  try {
+    start = new Chess(fen || START_FEN).fen();
+  } catch (e) {
+    start = START_FEN;
+    ucis = [];
+  }
+  const moves = pvToMoves(start, ucis || [], 600);
+  S.mode = 'board';
+  S.view = 'moves';
+  S.you = null;
+  S.retry = null;
+  S.ply = 0;
+  S.live = null;
+  S.hoverArrow = null;
+  S.game = {
+    id: 'brett', url: null, white: { name: 'Weiß', rating: null, avatar: null }, black: { name: 'Schwarz', rating: null, avatar: null },
+    result: '*', termination: '', date: '', timeControl: '', timeClass: '', startFen: start, moves: [], fens: [start],
+  };
+  const zero = { type: 'cp', value: 0 };
+  S.review = { positions: [{ lines: [], eval: zero }], evals: [zero], wins: [50], moves: [] };
+  S.variation = {
+    basePly: 0, returnPly: 0, moves, source: 'board', evals: [], lines: [], judged: [],
+    idx: idx == null ? moves.length : Math.max(0, Math.min(moves.length, idx)),
+  };
+
+  board.setEditor(null);
+  document.querySelector('.panel').classList.remove('is-editor');
+  $('home').hidden = true;
+  $('review').hidden = false;
+  $('btn-new').hidden = false;
+  $('coach').hidden = false;
+  $('pane-progress').hidden = $('pane-overview').hidden = $('pane-editor').hidden = true;
+  $('pane-moves').hidden = false;
+  $('controls').hidden = false;
+  $('board-tools').hidden = false;
+  $('ctl-overview').hidden = $('ctl-key').hidden = true;
+  $('graph-moves').parentElement.hidden = true;
+  document.title = 'Analysebrett · Chess Analyzer';
+  if (location.hash !== '#brett') history.pushState(null, '', '#brett');
+  window.scrollTo(0, 0);
+  board.setOrientation(S.orientation = start.split(' ')[1] === 'b' && !moves.length ? 'b' : 'w');
+  board.setInteractive(true);
+  board.setPosition(currentFen(), { animate: false });
+  startLive();
+  render();
+  saveBoard();
+}
+
+function boardGo(idx, sound = false) {
+  const v = S.variation;
+  const target = Math.max(0, Math.min(v.moves.length, idx));
+  if (target === v.idx) return;
+  if (sound && target === v.idx + 1) playSound(soundFor(v.moves[target - 1]));
+  v.idx = target;
+  startLive();
+  render();
+  saveBoard();
+}
+
+function boardPgn() {
+  const chess = new Chess(S.game.startFen);
+  for (const m of S.variation.moves) chess.move({ from: m.from, to: m.to, promotion: m.promotion || undefined });
+  // leere Standard-Kopfzeilen weglassen, eine eigene Startstellung (FEN) bleibt erhalten
+  return chess.pgn().split('\n').filter((l) => !/^\[(Event|Site|Date|Round|White|Black|Result) /.test(l)).join('\n').trim();
+}
+
+/** Kopiert Text in die Zwischenablage und bestätigt das kurz auf dem Knopf. */
+async function copyText(text, button) {
+  let ok = true;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (e) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+    ta.remove();
+  }
+  if (!button) return;
+  const label = button.dataset.label || (button.dataset.label = button.textContent);
+  button.textContent = ok ? 'Kopiert ✓' : 'Nicht möglich';
+  setTimeout(() => { button.textContent = label; }, 1300);
+}
+
+function showEditor(fen) {
+  live.stop();
+  S.live = null;
+  S.view = 'editor';
+  $('pane-moves').hidden = $('pane-progress').hidden = $('pane-overview').hidden = true;
+  $('controls').hidden = true;
+  $('pane-editor').hidden = false;
+  document.querySelector('.panel').classList.add('is-editor');
+  $('player-top').innerHTML = $('player-bottom').innerHTML = '';
+  renderEvalBar({ type: 'cp', value: 0 });
+  board.setInteractive(false);
+  board.setDecor({});
+  openEditor(fen);
+}
+
+/** Editor ohne Änderung verlassen: zurück zum Analysebrett, wie es war. */
+function closeEditor() {
+  const st = boardState();
+  openBoard(st.startFen, st.ucis, st.idx);
+}
+
+function buildBoardMoveList() {
+  const v = S.variation;
+  const parts = S.game.startFen.split(' ');
+  let num = +parts[5] || 1;
+  let html = '';
+  const cell = (i) => `<button type="button" class="mv" data-ply="${i + 1}"><span class="mv-ico">${v.judged[i + 1] ? classIcon(v.judged[i + 1].cls, 16) : ''}</span><span>${esc(sanDe(v.moves[i].san))}</span></button>`;
+  let i = 0;
+  if (v.moves.length && v.moves[0].color === 'b') {
+    html += `<div class="move-row"><span class="move-num">${num}.</span><span></span>${cell(0)}</div>`;
+    i = 1;
+    num++;
+  }
+  for (; i < v.moves.length; i += 2, num++) {
+    html += `<div class="move-row"><span class="move-num">${num}.</span>${cell(i)}${i + 1 < v.moves.length ? cell(i + 1) : '<span></span>'}</div>`;
+  }
+  if (!v.moves.length) html = '<div class="result-row">Noch keine Züge – zieh einfach los.</div>';
+  $('moves').innerHTML = html;
+}
+
+/** Trägt frisch berechnete Bewertungs-Symbole in die Zugliste nach. */
+function refreshMoveIcons() {
+  const v = S.variation;
+  const j = v.idx > 0 ? v.judged[v.idx] : null;
+  if (!j) return;
+  const ico = $('moves').querySelector(`.mv[data-ply="${v.idx}"] .mv-ico`);
+  if (ico && !ico.firstChild) ico.innerHTML = classIcon(j.cls, 16);
+}
+
+function renderBoardCoach() {
+  const v = S.variation;
+  const fen = currentFen();
+  const turn = fen.split(' ')[1];
+  const liveHere = S.live && S.live.fen === fen ? S.live : null;
+  const best = liveHere && liveHere.lines[0] ? pvToMoves(fen, liveHere.lines[0].pv, 1)[0] : null;
+  const ready = liveHere && liveHere.lines[0] && liveHere.lines[0].depth >= 10;
+  const paragraphs = [];
+  const actions = [];
+  let title = 'Analysebrett';
+  let cls = null;
+
+  if (v.idx > 0) {
+    const m = v.moves[v.idx - 1];
+    const before = v.idx === 1 ? S.game.startFen : v.moves[v.idx - 2].fen;
+    const fp = before.split(' ');
+    const ply = ((+fp[5] || 1) - 1) * 2 + (fp[1] === 'b' ? 1 : 0);
+    const j = judgeMove(v, v.idx);
+    title = j ? `${sanDe(m.san)} ist ${CLASSES[j.cls].noun}` : sanDe(m.san);
+    cls = j ? j.cls : null;
+    const what = describeMove(before, m, v.idx > 1 ? v.moves[v.idx - 2] : null, ply);
+    if (what) paragraphs.push(`${SIDE[m.color]} ${what}.`);
+    if (j && j.best && BAD.has(j.cls)) {
+      const better = pvToMoves(before, [j.best], 1)[0];
+      if (better) paragraphs.push(`Besser war **${sanDe(better.san)}**.`);
+      actions.push({ label: 'Zug zurücknehmen', icon: 'back', run: () => boardGo(v.idx - 1) });
+    }
+  } else {
+    paragraphs.push('Zieh für beide Seiten – die Engine rechnet mit. Über „Stellung bearbeiten“ baust du jede beliebige Stellung auf.');
+  }
+
+  if (liveHere && liveHere.terminal) {
+    paragraphs.push(liveHere.terminal.terminal === 'mate' ? `Schachmatt! ${SIDE[turn === 'w' ? 'b' : 'w']} gewinnt.` : 'Remis – hier geht nichts mehr.');
+  } else if (ready && best) {
+    paragraphs.push(`Bester Zug für ${SIDE[turn]}: **${sanDe(best.san)}**.`);
+    actions.push({ label: `${sanDe(best.san)} spielen`, icon: 'arrow', primary: true, run: () => playLine(0) });
+  } else {
+    paragraphs.push('Die Engine rechnet …');
+  }
+  setCoach({ cls, title, chip: ready || (liveHere && liveHere.terminal) ? currentEval() : null, paragraphs, actions });
 }
 
 init();

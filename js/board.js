@@ -42,7 +42,7 @@ export class Board {
     root.addEventListener('pointerdown', (e) => this.onPointerDown(e));
     root.addEventListener('pointermove', (e) => this.onPointerMove(e));
     root.addEventListener('pointerup', (e) => this.onPointerUp(e));
-    root.addEventListener('pointercancel', () => this.cancelDrag());
+    root.addEventListener('pointercancel', () => { this.paint = null; this.cancelDrag(); });
     root.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
@@ -217,6 +217,10 @@ export class Board {
     }
     this.arrowsEl.innerHTML = arrows;
 
+    // Badge nur neu aufbauen, wenn es sich ändert (sonst startet die Animation ständig neu)
+    const badgeKey = d.badge ? d.badge.square + d.badge.cls + this.orientation : '';
+    if (badgeKey === this.badgeKey) return;
+    this.badgeKey = badgeKey;
     if (d.badge) {
       const [x, y] = this.xy(d.badge.square);
       this.badgeEl.innerHTML = classIcon(d.badge.cls, 64);
@@ -302,7 +306,37 @@ export class Board {
     };
   }
 
+  /**
+   * Editor-Modus: Figuren frei setzen und verschieben (ohne Schachregeln).
+   * @param handler { tool(): 'hand' | 'erase' | Figurencode, place(square), move(from, to | null) } oder null
+   */
+  setEditor(handler) {
+    this.editor = handler || null;
+    this.paint = null;
+    this.root.classList.toggle('editing', !!handler);
+    this.clearSelection();
+  }
+
+  editDown(e) {
+    if (e.button > 0) return;
+    const sq = this.squareAt(e.clientX, e.clientY);
+    if (!sq) return;
+    e.preventDefault();
+    this.root.setPointerCapture(e.pointerId);
+    if (this.editor.tool() !== 'hand') {
+      this.paint = sq;
+      this.editor.place(sq);
+      return;
+    }
+    const piece = this.pieces.get(sq);
+    if (piece) this.drag = { from: sq, el: piece.el, startX: e.clientX, startY: e.clientY, moved: false, free: true };
+  }
+
   onPointerDown(e) {
+    if (this.editor) {
+      this.editDown(e);
+      return;
+    }
     if (!this.interactive || e.button > 0) return;
     if (e.target.closest('.board-promo')) return;
     const sq = this.squareAt(e.clientX, e.clientY);
@@ -319,6 +353,15 @@ export class Board {
   }
 
   onPointerMove(e) {
+    if (this.paint) {
+      // mit gedrückter Maus über mehrere Felder „malen“
+      const sq = this.squareAt(e.clientX, e.clientY);
+      if (sq && sq !== this.paint) {
+        this.paint = sq;
+        this.editor.place(sq);
+      }
+      return;
+    }
     const d = this.drag;
     if (!d) return;
     if (!d.moved && Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < 5) return;
@@ -332,10 +375,21 @@ export class Board {
   }
 
   onPointerUp(e) {
+    if (this.paint) {
+      this.paint = null;
+      return;
+    }
     const d = this.drag;
     if (!d) return;
     this.drag = null;
     d.el.classList.remove('dragging');
+    if (d.free) {
+      // Editor: Figur frei absetzen; außerhalb des Bretts = entfernen
+      const target = this.squareAt(e.clientX, e.clientY);
+      if (!d.moved || target === d.from) this.place(d.el, d.from);
+      else this.editor.move(d.from, target);
+      return;
+    }
     if (!d.moved) return; // Klick: Auswahl bleibt bestehen
     const sq = this.squareAt(e.clientX, e.clientY);
     if (sq && sq !== d.from && this.targets.some((t) => t.to === sq)) {
@@ -350,6 +404,7 @@ export class Board {
   }
 
   cancelDrag() {
+    this.paint = this.editor ? this.paint : null;
     if (!this.drag) return;
     this.drag.el.classList.remove('dragging');
     this.place(this.drag.el, this.drag.from);

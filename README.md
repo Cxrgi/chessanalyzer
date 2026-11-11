@@ -18,6 +18,10 @@ Nicht mit Chess.com verbunden. Die komplette Analyse läuft im Browser auf deine
 - Roter Pfeil auf dem Brett zeigt bei Fehlern, wie der Gegner sie bestraft
 - **„Bester Zug“** zeigt die Engine-Empfehlung samt Fortsetzung, **„Nochmal versuchen“** lässt dich den Fehler selbst korrigieren
 - **Eigene Varianten**: einfach Figuren ziehen, Stockfish rechnet live mit
+- **Analysebrett**: frei für beide Seiten ziehen, jeder Zug wird sofort bewertet, der beste Zug erscheint als Pfeil;
+  Zugliste zum Zurückspringen, FEN/PGN kopieren, der Stand bleibt beim Neuladen erhalten
+- **Stellungs-Editor**: beliebige Stellung aufbauen (Figuren setzen, verschieben, löschen, Zugrecht, Rochaderechte,
+  FEN einfügen) und von dort aus weiterspielen
 - Uhren, geschlagene Figuren, Brett drehen, Tastatursteuerung (← → Pos1 Ende, F = drehen, N = nächster Schlüsselmoment), Töne
 - Brettfarben und Figurensets wählbar, bereits analysierte Partien werden im Browser gespeichert
 
@@ -67,6 +71,7 @@ js/analysis.js        Zugbewertung und Genauigkeit
 js/coach.js           Erklärungen
 js/tactics.js         Abtausch, hängende Figuren, Gabeln
 js/board.js           Schachbrett
+js/editor.js          Stellungs-Editor für das Analysebrett
 data/openings.json    Eröffnungsbuch (erzeugt mit tools/build-openings.mjs)
 server.js             Lokaler Server mit /api/game
 netlify/functions/    Dieselbe Funktion für Netlify
