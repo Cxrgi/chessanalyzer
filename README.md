@@ -3,6 +3,8 @@
 Kostenlose Partieanalyse für chess.com-Partien – für alle, die dafür kein Abo bezahlen wollen.
 Link einfügen, und ein Coach geht die Partie Zug für Zug mit dir durch.
 
+**Live:** <https://chessanalyzer-cxrgi.netlify.app>
+
 Nicht mit Chess.com verbunden. Die komplette Analyse läuft im Browser auf deinem Gerät (Stockfish als WebAssembly).
 
 ## Was die Seite kann
