@@ -7,6 +7,8 @@
 //   move    – Zug finden: accept (UCI-Liste) und/oder mate: true (jeder Mattzug zählt);
 //             mehrzügig über seq: [{ user: [...] | mate, text }, { auto: 'uci' | [Kandidaten] }, …]
 //   Bei falschen Zügen: wrong { uci: Text } für gezielte Hinweise, sonst allgemeine Rückmeldung.
+import { EXTRA, MORE_COURSES } from './lessons-more.js';
+
 const START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
 export const COURSES = [
@@ -446,3 +448,9 @@ export const COURSES = [
     ],
   },
 ];
+
+// Weiterführende Lektionen (lessons-more.js) anhängen
+for (const [courseId, lessons] of Object.entries(EXTRA)) {
+  COURSES.find((c) => c.id === courseId).lessons.push(...lessons);
+}
+COURSES.push(...MORE_COURSES);

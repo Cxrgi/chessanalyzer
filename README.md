@@ -11,8 +11,9 @@ Nicht mit Chess.com verbunden. Die komplette Analyse läuft im Browser auf deine
 
 - **Passwortschutz**: Beim ersten Besuch legst du ein Passwort fest; danach kommt niemand ohne Anmeldung auf die Seite
 - **Startseite** mit allen Bereichen auf einen Blick
-- **Lektionen**: 28 kurze, interaktive Lektionen in fünf Kursen (Grundlagen, Taktik, Mattbilder, Eröffnung, Endspiel) –
-  mit Aufgaben direkt auf dem Brett, Tipps, Lösungen und gespeichertem Fortschritt
+- **Lektionen**: 53 kurze, interaktive Lektionen in neun Kursen – Grundlagen, Taktik, Mattbilder, Eröffnung, Endspiel,
+  Sicher spielen, Taktik für Fortgeschrittene, Strategie und Königsangriff – mit Aufgaben direkt auf dem Brett,
+  Tipps, Lösungen und gespeichertem Fortschritt
 - **Partie laden** über einen chess.com-Link, über deinen Benutzernamen (Liste der letzten Partien) oder per PGN
 - **Jeder Zug bewertet**: Brillant, Großartig, Bester Zug, Ausgezeichnet, Gut, Buchzug, Ungenauigkeit, Fehler, Verpasste Chance, Patzer
 - **Bewertungsleiste**, Genauigkeit für beide Seiten, Bewertungsdiagramm, Eröffnungsname
@@ -90,7 +91,8 @@ js/tactics.js         Abtausch, hängende Figuren, Gabeln
 js/board.js           Schachbrett
 js/editor.js          Stellungs-Editor für das Analysebrett
 js/lessons.js         Lektions-Übersicht und -Player
-js/lessons-data.js    Inhalte aller Lektionen (geprüft mit tools/check-lessons.mjs)
+js/lessons-data.js    Inhalte der Grundkurse (geprüft mit tools/check-lessons.mjs)
+js/lessons-more.js    Weiterführende Lektionen
 server/gate.mjs       Passwortschutz (lokaler Server und Netlify Edge Function)
 data/openings.json    Eröffnungsbuch (erzeugt mit tools/build-openings.mjs)
 server.js             Lokaler Server mit /api/game
