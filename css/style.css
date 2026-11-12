@@ -142,16 +142,16 @@ a { color: var(--accent); }
 .foot a { color: inherit; }
 
 /* ---- Übersicht ---------------------------------------------------------- */
-.hub, .lessons { max-width: 980px; margin: 0 auto; padding: clamp(24px, 6vh, 64px) 16px calc(40px + var(--dock)); }
+.hub, .lessons { max-width: 1080px; margin: 0 auto; padding: clamp(24px, 6vh, 64px) 16px calc(40px + var(--dock)); }
 .hub-head { text-align: center; margin-bottom: 26px; }
 .hub-head h1 { font-size: clamp(1.8rem, 4.6vw, 2.8rem); line-height: 1.1; letter-spacing: -.03em; margin: 0 0 10px; text-wrap: balance; }
-.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.tiles { display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px; }
 .tile {
-  grid-column: span 1; text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 18px;
+  grid-column: span 3; text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 18px;
   display: flex; flex-direction: column; gap: 6px; min-height: 150px; position: relative; overflow: hidden;
   transition: transform .12s, border-color .15s, background .15s;
 }
-.tile.big { grid-column: span 2; min-height: 176px; background: linear-gradient(140deg, #212a36, var(--panel) 70%); }
+.tile.big { grid-column: span 4; min-height: 176px; background: linear-gradient(140deg, #212a36, var(--panel) 70%); }
 .tile:hover { transform: translateY(-2px); border-color: var(--accent); background: var(--panel-2); }
 .tile b { font-size: 1.12rem; letter-spacing: -.01em; }
 .tile.big b { font-size: 1.32rem; }
@@ -200,6 +200,28 @@ a { color: var(--accent); }
 .pw-form input { background: var(--bg-2); color: var(--text); border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; font: inherit; }
 .pw-form input:focus { outline: none; border-color: var(--accent); }
 .pw-form .btn { align-self: flex-start; }
+
+/* ---- Taktikaufgaben ----------------------------------------------------- */
+#pane-puzzle { gap: 12px; flex: 0 0 auto; }
+.pz-top { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
+.pz-label { color: var(--muted); font-size: .74rem; text-transform: uppercase; letter-spacing: .07em; font-weight: 700; display: block; }
+.pz-rating { display: flex; align-items: baseline; gap: 10px; }
+.pz-rating b { font-size: 2.3rem; line-height: 1.05; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.pz-delta { font-weight: 800; font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.pz-delta.up { color: var(--accent); }
+.pz-delta.down { color: #ff7769; }
+.pz-streak { text-align: right; }
+.pz-streak b { font-size: 1.6rem; line-height: 1.1; color: var(--warn); font-variant-numeric: tabular-nums; }
+.pz-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.pz-stats div { background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; line-height: 1.25; }
+.pz-stats b { font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.pz-stats span { color: var(--muted); font-size: .78rem; }
+.pz-recent { display: flex; gap: 4px; min-height: 10px; color: var(--muted); font-size: .84rem; }
+.pz-recent i { flex: 1; max-width: 26px; height: 8px; border-radius: 99px; }
+.pz-recent i.ok { background: var(--accent); }
+.pz-recent i.no { background: #fa5a48; }
+.pz-select { background: var(--bg-2); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 10px 11px; font: inherit; margin-top: -6px; }
+.pz-select:focus { outline: none; border-color: var(--accent); }
 
 /* ---- Analyse-Layout ----------------------------------------------------- */
 .review {
@@ -453,10 +475,15 @@ label.ed-label { margin-bottom: -6px; }
   .player { height: 40px; }
   .evalbar-num { font-size: .5rem; }
 }
+@media (max-width: 900px) and (min-width: 641px) {
+  .tile.big { grid-column: span 12; min-height: 0; }
+  .tile { grid-column: span 6; }
+}
 @media (max-width: 640px) {
   .tiles { grid-template-columns: 1fr 1fr; gap: 10px; }
   .tile, .tile.big { grid-column: span 2; min-height: 0; }
   .tile:not(.big) { grid-column: span 1; padding: 14px; }
+  .tiles { grid-template-columns: 1fr 1fr; }
   .tile:not(.big) small { display: none; }
   .course-head { flex-direction: column; align-items: stretch; }
   .load-row:not(.sub) { flex-direction: column; }

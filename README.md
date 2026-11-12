@@ -11,6 +11,8 @@ Nicht mit Chess.com verbunden. Die komplette Analyse läuft im Browser auf deine
 
 - **Passwortschutz**: Beim ersten Besuch legst du ein Passwort fest; danach kommt niemand ohne Anmeldung auf die Seite
 - **Startseite** mit allen Bereichen auf einen Blick
+- **Taktikaufgaben**: rund 13 500 Aufgaben von leicht bis schwer, automatisch passend zur eigenen Wertung –
+  mit Wertungszahl, Serie, Statistik, Tipp, vorgespielter Lösung und Themen-Training (Gabel, Fesselung, Matt in 2 …)
 - **Lektionen**: 53 kurze, interaktive Lektionen in neun Kursen – Grundlagen, Taktik, Mattbilder, Eröffnung, Endspiel,
   Sicher spielen, Taktik für Fortgeschrittene, Strategie und Königsangriff – mit Aufgaben direkt auf dem Brett,
   Tipps, Lösungen und gespeichertem Fortschritt
@@ -93,6 +95,8 @@ js/editor.js          Stellungs-Editor für das Analysebrett
 js/lessons.js         Lektions-Übersicht und -Player
 js/lessons-data.js    Inhalte der Grundkurse (geprüft mit tools/check-lessons.mjs)
 js/lessons-more.js    Weiterführende Lektionen
+js/puzzles.js         Taktikaufgaben (Auswahl nach Wertung, Wertungsberechnung, Themenfilter)
+data/puzzles/         Aufgaben nach Schwierigkeit (erzeugt mit tools/select-puzzles.py + tools/build-puzzles.mjs)
 server/gate.mjs       Passwortschutz (lokaler Server und Netlify Edge Function)
 data/openings.json    Eröffnungsbuch (erzeugt mit tools/build-openings.mjs)
 server.js             Lokaler Server mit /api/game
@@ -105,5 +109,6 @@ vendor/               Stockfish und chess.js
 - [Stockfish.js](https://github.com/nmrugg/stockfish.js) 19 (Lite, single-threaded) – GPLv3, siehe `vendor/stockfish/COPYING.txt`
 - [chess.js](https://github.com/jhlywa/chess.js) – BSD-2-Clause, siehe `vendor/chess.js.LICENSE`
 - Eröffnungsdaten: [lichess-org/chess-openings](https://github.com/lichess-org/chess-openings) – CC0
+- Taktikaufgaben: Auswahl aus der [Lichess-Aufgabensammlung](https://database.lichess.org/#puzzles) – CC0
 - Figurensets aus [lichess-org/lila](https://github.com/lichess-org/lila) – siehe `assets/pieces/README.md`
 - Formeln für Gewinnwahrscheinlichkeit und Genauigkeit angelehnt an die offen dokumentierten Lichess-Formeln

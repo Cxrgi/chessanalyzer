@@ -1,6 +1,7 @@
 // Hauptlogik: Partie laden → analysieren → Übersicht → Zug für Zug mit Coach.
 import { Chess } from '../vendor/chess.js';
 import { openEditor, bindEditor } from './editor.js';
+import { initPuzzles, openPuzzles, puzzleTargets, puzzleMove, puzzleKey, puzzleSummary, leavePuzzles } from './puzzles.js';
 import { initLessons, renderLessonList, openLesson, lessonTargets, lessonMove, lessonKey, lessonProgress } from './lessons.js';
 import { Board } from './board.js';
 import { AnalysisPool, LiveEngine } from './engine.js';
@@ -89,6 +90,7 @@ function init() {
   $('user-input').value = S.username;
   bindEditor({ board, $, setCoach, uiIcon, copyText, pieceSet: () => S.settings.pieces, onPlay: (fen) => openBoard(fen), onCancel: closeEditor });
   initLessons({ board, $, setCoach, store, uiIcon, esc, playSound, enterLessonView });
+  initPuzzles({ board, $, setCoach, store, playSound, enterPuzzleView, openBoard: (fen, ucis) => openBoard(fen, ucis, 1) });
   initAccount();
   routeFromHash();
   watchHostBadge();
@@ -202,7 +204,7 @@ function bindEvents() {
     const t = e.target.closest('.tile');
     if (!t) return;
     const go = t.dataset.go;
-    if (go === 'analyse' || go === 'lektionen' || go === 'brett') location.hash = '#' + go;
+    if (go === 'analyse' || go === 'lektionen' || go === 'brett' || go === 'aufgaben') location.hash = '#' + go;
     else if (go === 'editor') { openBoard(); showEditor(currentFen()); }
     else if (go === 'demo') startGame(gameFromPgn(DEMO_PGN));
     else if (go === 'recent') {
@@ -280,6 +282,10 @@ function bindEvents() {
     if (e.target.closest('input, textarea, dialog') || e.metaKey || e.ctrlKey || e.altKey) return;
     if (S.view === 'lesson') {
       if (lessonKey(e.key)) e.preventDefault();
+      return;
+    }
+    if (S.view === 'puzzle') {
+      if (puzzleKey(e.key)) e.preventDefault();
       return;
     }
     if (S.view !== 'moves' && S.view !== 'overview') return;
@@ -456,6 +462,13 @@ async function routeFromHash() {
     showLessons();
     return;
   }
+  if (id === 'aufgaben') {
+    if (S.mode !== 'puzzle') {
+      leaveModes();
+      openPuzzles();
+    }
+    return;
+  }
   if (id.startsWith('lektion/')) {
     leaveModes();
     if (!openLesson(id.slice(8))) showLessons();
@@ -499,8 +512,9 @@ function leaveModes() {
   board.setInteractive(false);
   document.querySelector('.panel').classList.remove('is-editor');
   $('review').classList.remove('lesson-mode');
-  $('pane-editor').hidden = $('pane-lesson').hidden = true;
+  $('pane-editor').hidden = $('pane-lesson').hidden = $('pane-puzzle').hidden = true;
   $('coach').hidden = false;
+  leavePuzzles();
   S.game = S.review = S.variation = S.retry = null;
 }
 
@@ -520,6 +534,8 @@ function goHome(fromHash) {
 function renderHub() {
   const { done, total, next } = lessonProgress();
   $('tile-prog').innerHTML = `<span>${done} von ${total} geschafft</span><div class="bar"><i style="width:${(done / total) * 100}%"></i></div>`;
+  const pz = puzzleSummary();
+  $('tile-puzzles').innerHTML = `<span>Wertung ${pz.rating} · ${pz.solved} gelöst</span>`;
   const cont = $('hub-continue');
   cont.hidden = !next || done === 0;
   if (next) cont.innerHTML = `<div><span>Weiter lernen</span><b>${esc(next.title)}</b></div>${uiIcon('arrow', 22)}`;
@@ -556,6 +572,19 @@ function enterLessonView(title) {
   $('controls').hidden = true;
   $('pane-lesson').hidden = false;
   document.title = `${title} · Chess Analyzer`;
+  window.scrollTo(0, 0);
+}
+
+/** Bereitet die Brettansicht für die Taktikaufgaben vor (wird vom Aufgaben-Modul aufgerufen). */
+function enterPuzzleView() {
+  S.mode = 'puzzle';
+  S.view = 'puzzle';
+  showMain('review');
+  $('review').classList.add('lesson-mode');
+  $('pane-progress').hidden = $('pane-overview').hidden = $('pane-moves').hidden = $('pane-editor').hidden = $('pane-lesson').hidden = true;
+  $('controls').hidden = true;
+  $('pane-puzzle').hidden = false;
+  document.title = 'Taktikaufgaben · Chess Analyzer';
   window.scrollTo(0, 0);
 }
 
@@ -902,6 +931,7 @@ function flip() {
 
 function legalTargets(square) {
   if (S.mode === 'lesson') return lessonTargets(square);
+  if (S.mode === 'puzzle') return puzzleTargets(square);
   if (S.view !== 'moves') return [];
   if (S.retry && S.retry.state !== 'waiting') return [];
   const chess = new Chess(currentFen());
@@ -920,6 +950,10 @@ function toMove(m, fen) {
 function onUserMove({ from, to, promotion }) {
   if (S.mode === 'lesson') {
     lessonMove({ from, to, promotion });
+    return;
+  }
+  if (S.mode === 'puzzle') {
+    puzzleMove({ from, to, promotion });
     return;
   }
   const fen = currentFen();
