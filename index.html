@@ -19,16 +19,45 @@
       <span>Chess<b>Analyzer</b></span>
     </a>
     <nav class="topbar-actions">
-      <button class="btn ghost" id="btn-new" hidden>Neue Partie</button>
+      <button class="btn ghost" id="btn-board">Analysebrett</button>
+      <button class="btn ghost" id="btn-new" hidden>Start</button>
       <button class="icon-btn" id="btn-sound" title="Ton an/aus" aria-label="Ton an/aus"></button>
+      <button class="icon-btn" id="btn-logout" title="Abmelden" aria-label="Abmelden" hidden></button>
       <button class="icon-btn" id="btn-settings" title="Einstellungen" aria-label="Einstellungen"></button>
     </nav>
   </header>
 
-  <!-- Startseite ------------------------------------------------------------>
-  <main id="home" class="home">
+  <!-- Übersicht --------------------------------------------------------------->
+  <main id="hub" class="hub">
+    <header class="hub-head">
+      <p class="eyebrow">Dein Schachraum</p>
+      <h1>Was möchtest du tun?</h1>
+    </header>
+    <button type="button" class="continue" id="hub-continue" hidden></button>
+    <div class="tiles">
+      <button type="button" class="tile big" data-go="analyse"><span class="tile-ico" data-ico="search"></span><b>Partie analysieren</b><small>Link einer chess.com-Partie einfügen – der Coach erklärt jeden Zug.</small></button>
+      <button type="button" class="tile big" data-go="lektionen"><span class="tile-ico" data-ico="book"></span><b>Lektionen</b><small>Schach lernen – von den Regeln bis zum Endspiel.</small><span class="tile-prog" id="tile-prog"></span></button>
+      <button type="button" class="tile big" data-go="aufgaben"><span class="tile-ico" data-ico="bulb"></span><b>Taktikaufgaben</b><small>Tausende Aufgaben, passend zu deiner Spielstärke.</small><span class="tile-prog" id="tile-puzzles"></span></button>
+      <button type="button" class="tile" data-go="brett"><span class="tile-ico" data-ico="grid"></span><b>Analysebrett</b><small>Frei für beide Seiten ziehen, die Engine zeigt den besten Zug.</small></button>
+      <button type="button" class="tile" data-go="editor"><span class="tile-ico" data-ico="edit"></span><b>Stellung aufbauen</b><small>Eigene Position festlegen und von dort aus spielen.</small></button>
+      <button type="button" class="tile" data-go="recent"><span class="tile-ico" data-ico="user"></span><b>Meine letzten Partien</b><small>Partien direkt aus deinem chess.com-Konto auswählen.</small></button>
+      <button type="button" class="tile" data-go="demo"><span class="tile-ico" data-ico="play"></span><b>Beispielpartie</b><small>Die berühmte Opernpartie mit Coach ansehen.</small></button>
+    </div>
+
+    <section class="list-card" id="history-card" hidden>
+      <header><h2>Zuletzt analysiert</h2></header>
+      <ul class="game-list" id="history-list"></ul>
+    </section>
+    <footer class="foot">
+      Nicht mit Chess.com verbunden. Engine: <a href="https://github.com/nmrugg/stockfish.js" target="_blank" rel="noopener">Stockfish</a> (GPL) ·
+      Die Analyse läuft komplett auf deinem Gerät.
+    </footer>
+  </main>
+
+  <!-- Partie laden ------------------------------------------------------------>
+  <main id="home" class="home" hidden>
     <section class="hero">
-      <p class="eyebrow">Kostenlos · ohne Anmeldung · läuft in deinem Browser</p>
+      <p class="eyebrow">Partie analysieren</p>
       <h1>Verstehe jede deiner Partien.</h1>
       <p class="lead">Füge den Link einer chess.com-Partie ein. Dein Coach geht sie Zug für Zug mit dir durch – mit Bewertungsleiste, besten Zügen und verständlichen Erklärungen.</p>
 
@@ -41,7 +70,7 @@
         <div class="load-row sub">
           <label for="user-input">Dein chess.com-Name</label>
           <input id="user-input" type="text" spellcheck="false" placeholder="optional" maxlength="40">
-          <span class="hint">Damit das Brett aus deiner Sicht steht und Links immer gefunden werden.</span>
+          <span class="hint">Damit das Brett aus deiner Sicht steht und du deine letzten Partien auswählen kannst.</span>
         </div>
         <p class="load-status" id="load-status" role="status" hidden></p>
       </form>
@@ -56,21 +85,16 @@
       <header><h2 id="games-title">Letzte Partien</h2><button class="icon-btn" id="games-close" aria-label="Schließen"></button></header>
       <ul class="game-list" id="games-list"></ul>
     </section>
+  </main>
 
-    <section class="list-card" id="history-card" hidden>
-      <header><h2>Zuletzt analysiert</h2></header>
-      <ul class="game-list" id="history-list"></ul>
-    </section>
-
-    <section class="features">
-      <article><span class="f-ico" id="f1"></span><h3>Jeder Zug bewertet</h3><p>Von „Brillant“ bis „Patzer“ – du siehst sofort, wo die Partie gekippt ist.</p></article>
-      <article><span class="f-ico" id="f2"></span><h3>Coach, der erklärt</h3><p>Warum war der Zug schlecht? Was wäre besser gewesen? In klaren Sätzen statt nur Zahlen.</p></article>
-      <article><span class="f-ico" id="f3"></span><h3>Selbst ausprobieren</h3><p>Fehler nochmal versuchen, eigene Varianten ziehen – Stockfish rechnet live mit.</p></article>
-    </section>
-    <footer class="foot">
-      Nicht mit Chess.com verbunden. Engine: <a href="https://github.com/nmrugg/stockfish.js" target="_blank" rel="noopener">Stockfish</a> (GPL) ·
-      Die Analyse läuft komplett auf deinem Gerät.
-    </footer>
+  <!-- Lektionen --------------------------------------------------------------->
+  <main id="lessons" class="lessons" hidden>
+    <header class="hub-head">
+      <p class="eyebrow">Lektionen</p>
+      <h1>Schach lernen, Schritt für Schritt.</h1>
+      <p class="lead" id="lessons-lead"></p>
+    </header>
+    <div id="lessons-list"></div>
   </main>
 
   <!-- Analyse ---------------------------------------------------------------->
@@ -118,6 +142,9 @@
       <section class="pane" id="pane-overview" hidden>
         <div class="acc-row" id="acc-row"></div>
         <table class="counts" id="counts"></table>
+        <div class="ov-block" id="phases"></div>
+        <div class="ov-block" id="moments"></div>
+        <div class="ov-block" id="tips"></div>
         <div class="graph-wrap"><svg id="graph-overview" class="graph" viewBox="0 0 400 90" preserveAspectRatio="none"></svg></div>
         <p class="opening" id="opening-line"></p>
         <button class="btn primary big" id="btn-start">Analyse starten</button>
@@ -125,10 +152,66 @@
 
       <!-- Zug für Zug -->
       <section class="pane" id="pane-moves" hidden>
+        <div class="board-tools" id="board-tools" hidden>
+          <button type="button" class="btn soft small" id="bt-edit">Stellung bearbeiten</button>
+          <button type="button" class="btn soft small" id="bt-reset">Neu</button>
+          <button type="button" class="btn soft small" id="bt-fen">FEN kopieren</button>
+          <button type="button" class="btn soft small" id="bt-pgn">PGN kopieren</button>
+          <label class="toggle"><input type="checkbox" id="bt-arrow" checked> Besten Zug als Pfeil zeigen</label>
+        </div>
         <div class="variation" id="variation" hidden></div>
         <div class="lines" id="lines"></div>
         <div class="moves" id="moves" tabindex="-1"></div>
         <div class="graph-wrap small"><svg id="graph-moves" class="graph" viewBox="0 0 400 60" preserveAspectRatio="none"></svg></div>
+      </section>
+
+      <!-- Lektion -->
+      <section class="pane" id="pane-lesson" hidden>
+        <div class="ls-head"><span id="ls-course"></span><b id="ls-title"></b></div>
+        <div class="ls-dots" id="ls-dots"></div>
+        <p class="ls-count" id="ls-count"></p>
+        <div class="ls-nav">
+          <button type="button" class="btn ghost" id="ls-prev">Zurück</button>
+          <button type="button" class="btn soft" id="ls-next">Weiter</button>
+        </div>
+        <button type="button" class="link ls-all" id="ls-all">Alle Lektionen</button>
+      </section>
+
+      <!-- Taktikaufgaben -->
+      <section class="pane" id="pane-puzzle" hidden>
+        <div class="pz-top">
+          <div><span class="pz-label">Deine Wertung</span><div class="pz-rating"><b id="pz-rating">1000</b><span id="pz-delta" class="pz-delta"></span></div></div>
+          <div class="pz-streak"><span class="pz-label">Serie</span><b id="pz-streak">0</b></div>
+        </div>
+        <div class="pz-stats">
+          <div><b id="pz-solved">0</b><span>gelöst</span></div>
+          <div><b id="pz-quote">–</b><span>Quote</span></div>
+          <div><b id="pz-best">0</b><span>beste Serie</span></div>
+        </div>
+        <div class="pz-recent" id="pz-recent"></div>
+        <label class="ed-label" for="pz-theme">Thema</label>
+        <select id="pz-theme" class="pz-select"></select>
+        <button type="button" class="btn ghost" id="pz-next">Aufgeben und Lösung zeigen</button>
+        <p class="hint" id="pz-info"></p>
+      </section>
+
+      <!-- Stellung aufbauen -->
+      <section class="pane" id="pane-editor" hidden>
+        <div class="palette" id="palette"></div>
+        <div class="ed-row"><span class="ed-label">Am Zug</span><div class="seg two" id="ed-turn"></div></div>
+        <div class="ed-row"><span class="ed-label">Rochade</span><div class="ed-castle" id="ed-castle"></div></div>
+        <div class="ed-row wrap">
+          <button type="button" class="btn soft small" id="ed-start">Grundstellung</button>
+          <button type="button" class="btn soft small" id="ed-clear">Leeres Brett</button>
+          <button type="button" class="btn soft small" id="ed-flip">Brett drehen</button>
+        </div>
+        <label class="ed-label" for="ed-fen">FEN (zum Einfügen oder Kopieren)</label>
+        <div class="ed-row"><input id="ed-fen" type="text" spellcheck="false" autocomplete="off"><button type="button" class="btn soft small" id="ed-copy">Kopieren</button></div>
+        <p class="ed-error" id="ed-error" hidden></p>
+        <div class="ed-row end">
+          <button type="button" class="btn ghost" id="ed-cancel">Abbrechen</button>
+          <button type="button" class="btn primary" id="ed-go">Von hier spielen</button>
+        </div>
       </section>
 
       <footer class="controls" id="controls" hidden>
@@ -137,6 +220,7 @@
         <button class="ctl wide" id="ctl-prev" title="Zurück (←)" aria-label="Zug zurück"></button>
         <button class="ctl wide" id="ctl-next" title="Weiter (→)" aria-label="Zug vor"></button>
         <button class="ctl" id="ctl-last" title="Zum Ende (Ende)" aria-label="Zum Ende"></button>
+        <button class="ctl" id="ctl-key" title="Nächster Schlüsselmoment (N)" aria-label="Nächster Schlüsselmoment"></button>
         <button class="ctl" id="ctl-flip" title="Brett drehen (F)" aria-label="Brett drehen"></button>
       </footer>
     </aside>
@@ -153,6 +237,15 @@
       <h3>Analysetiefe</h3>
       <div class="seg" id="set-depth"></div>
       <p class="hint">Tiefer = genauer, dauert aber länger. Gilt ab der nächsten Analyse.</p>
+      <div id="pw-box" hidden>
+        <h3>Passwort ändern</h3>
+        <div class="pw-form">
+          <input type="password" id="pw-current" placeholder="Aktuelles Passwort" autocomplete="current-password">
+          <input type="password" id="pw-next" placeholder="Neues Passwort (mind. 6 Zeichen)" autocomplete="new-password">
+          <button type="button" class="btn soft small" id="pw-save">Speichern</button>
+        </div>
+        <p class="hint" id="pw-msg"></p>
+      </div>
     </form>
   </dialog>
 

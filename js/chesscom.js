@@ -264,6 +264,7 @@ async function viaOwnProxy(type, id) {
   try {
     data = await fetchJson(`api/game?type=${type}&id=${id}`, { timeout: 15000 });
   } catch (e) {
+    if (e.status === 401) throw new LoadError('auth', 'Deine Anmeldung ist abgelaufen. Bitte lade die Seite neu und melde dich wieder an.');
     // 404 oder HTML statt JSON → auf diesem Server gibt es keinen Proxy
     if (e.name !== 'AbortError') proxyMissing = true;
     throw e;

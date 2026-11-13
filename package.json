@@ -6,5 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.js"
+  },
+  "dependencies": {
+    "@netlify/blobs": "^11.1.9"
   }
 }
