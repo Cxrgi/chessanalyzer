@@ -67,11 +67,12 @@
       <form id="load-form" class="load-card" autocomplete="off">
         <label class="sr-only" for="game-input">Link, Benutzername oder PGN</label>
         <div class="load-row">
-          <textarea id="game-input" rows="1" spellcheck="false" placeholder="https://www.chess.com/game/live/…"></textarea>
+          <textarea id="game-input" rows="1" spellcheck="false" placeholder="Link von chess.com oder Lichess einfügen …"></textarea>
           <button class="btn primary" type="submit" id="btn-load">Analysieren</button>
         </div>
         <div class="load-row sub">
-          <label for="user-input">Dein chess.com-Name</label>
+          <label for="user-input">Dein Name auf</label>
+          <select id="site-input" aria-label="Schachseite"><option value="chesscom">chess.com</option><option value="lichess">Lichess</option></select>
           <input id="user-input" type="text" spellcheck="false" placeholder="optional" maxlength="40">
           <span class="hint">Damit das Brett aus deiner Sicht steht und du deine letzten Partien auswählen kannst.</span>
         </div>
@@ -79,13 +80,15 @@
       </form>
 
       <p class="alt-actions">
-        Geht auch: <button class="link" id="btn-recent">meine letzten Partien anzeigen</button>,
-        ein PGN einfügen oder die <button class="link" id="btn-demo">Beispielpartie</button> ansehen.
+        Geht auch: ein Lichess-Link, <button class="link" id="btn-recent">meine letzten Partien anzeigen</button>,
+        ein PGN einfügen, eine <button class="link" id="btn-file">PGN-Datei öffnen</button> (oder hierher ziehen) oder die <button class="link" id="btn-demo">Beispielpartie</button> ansehen.
+        <input type="file" id="pgn-file" accept=".pgn,.txt,text/plain,application/x-chess-pgn" hidden>
       </p>
     </section>
 
     <section class="list-card" id="games-card" hidden>
       <header><h2 id="games-title">Letzte Partien</h2><button class="icon-btn" id="games-close" aria-label="Schließen"></button></header>
+      <div class="chips" id="games-filter"></div>
       <ul class="game-list" id="games-list"></ul>
     </section>
   </main>

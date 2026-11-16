@@ -103,6 +103,14 @@ a { color: var(--accent); }
   padding: 7px 10px; font: inherit;
 }
 .load-row.sub .hint { flex: 1; min-width: 200px; }
+.load-row.sub select { background: var(--bg-2); color: var(--text); border: 1px solid var(--line); border-radius: 9px; padding: 7px 8px; font: inherit; }
+.load-card.drop { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(62, 207, 142, .25); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.chips:empty { display: none; }
+.chip { border: 1px solid var(--line); background: var(--bg-2); border-radius: 99px; padding: 4px 11px; font-size: .84rem; color: var(--muted); }
+.chip.on { border-color: var(--accent); color: var(--text); background: rgba(62, 207, 142, .14); }
+.chip-gap { width: 8px; }
+.game-meta .done { color: var(--accent); font-weight: 650; }
 .load-status { margin: 12px 2px 2px; font-size: .95rem; color: var(--muted); display: flex; gap: 8px; align-items: center; }
 .load-status.error { color: #ff8f80; }
 .load-status .spinner { flex: none; }

@@ -9,6 +9,8 @@ import { initLessons, renderLessonList, openLesson, lessonTargets, lessonMove, l
 import { Board } from './board.js';
 import { AnalysisPool, LiveEngine, warmEngine } from './engine.js';
 import { db, migrateLegacy } from './db.js';
+import { parseLichessLink, loadLichessGame, fetchLichessGames } from './lichess.js';
+import { buildPgn, splitPgn, pgnTag, packPgn, unpackPgn } from './pgn.js';
 import { gameSummary, mistakeCards, timeReport, timeSpent } from './insights.js';
 import { reviewGame, bookMoves, winPct, evalText, CLASSES, CLASS_ORDER, BAD } from './analysis.js';
 import { explainMove, summarize, resultText, describeMove, pvToMoves, lineText, sanDe, say } from './coach.js';
@@ -63,6 +65,7 @@ const store = {
 const S = {
   settings: { theme: 'green', pieces: 'cburnett', depth: 16, sound: true, ...store.get('settings', {}) },
   username: store.get('username', ''),
+  site: store.get('site', 'chesscom'),
   view: 'home',
   mode: null, // 'game' = Partieanalyse, 'board' = freies Analysebrett
   game: null,
@@ -214,6 +217,26 @@ function bindEvents() {
     showRecentGames(name);
   };
   $('games-close').onclick = () => { $('games-card').hidden = true; };
+  $('site-input').value = S.site;
+  $('site-input').onchange = (e) => {
+    S.site = e.target.value;
+    store.set('site', S.site);
+  };
+  $('btn-file').onclick = () => $('pgn-file').click();
+  $('pgn-file').onchange = (e) => {
+    openPgnFile(e.target.files[0]);
+    e.target.value = '';
+  };
+  const card = $('load-form');
+  for (const ev of ['dragenter', 'dragover']) card.addEventListener(ev, (e) => { e.preventDefault(); card.classList.add('drop'); });
+  for (const ev of ['dragleave', 'drop']) card.addEventListener(ev, (e) => { e.preventDefault(); card.classList.remove('drop'); });
+  card.addEventListener('drop', (e) => openPgnFile(e.dataTransfer.files[0]));
+  $('games-filter').addEventListener('click', (e) => {
+    const c = e.target.closest('.chip');
+    if (!c) return;
+    S.gamesList.filter[c.dataset.key] = c.dataset.value;
+    renderGamesList();
+  });
   $('btn-new').onclick = goHome;
   $('btn-board').onclick = () => openBoard(S.mode === 'game' && S.view === 'moves' ? currentFen() : null);
   document.querySelector('.tiles').addEventListener('click', (e) => {
@@ -256,6 +279,15 @@ function bindEvents() {
   $('ctl-last').onclick = () => (S.mode === 'board' ? boardGo(Infinity) : go(S.game.moves.length));
   $('ctl-flip').onclick = flip;
   $('ctl-key').onclick = nextKey;
+  $('ov-actions').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-act]');
+    if (!b || !S.review) return;
+    const act = b.dataset.act;
+    if (act === 'summary') copyText(summaryText(), b);
+    else if (act === 'pgn') download(new Blob([buildPgn(S.game, S.review)], { type: 'application/x-chess-pgn' }), `${S.game.white.name}-${S.game.black.name}.pgn`.replace(/[^\w.-]+/g, '_'));
+    else if (act === 'share') copyText(`${location.origin}${location.pathname}#pgn=${await packPgn(buildPgn(S.game))}`, b);
+    else if (act === 'png') boardPng();
+  });
   $('moments').addEventListener('click', (e) => {
     const b = e.target.closest('.moment');
     if (b) { showMoves(); go(+b.dataset.ply); }
@@ -356,19 +388,58 @@ async function submitInput() {
   }
   try {
     if (/\[\w+\s+"/.test(text) || /\d\.\s*[a-hNBRQKO]/.test(text)) {
-      startGame(gameFromPgn(text));
+      openPgnText(text);
+      return;
+    }
+    const lichessId = parseLichessLink(text);
+    if (lichessId) {
+      setStatus('Lade die Partie von Lichess …', 'busy');
+      const game = await loadLichessGame(lichessId);
+      setStatus('');
+      startGame(game);
       return;
     }
     const link = parseGameLink(text);
     if (link) {
-      await loadLink(link, username);
+      await loadLink(link, S.site === 'chesscom' ? username : '');
       return;
     }
     if (/^[\w-]{2,40}$/.test(text)) {
       showRecentGames(text);
       return;
     }
-    setStatus('Das sieht nicht nach einem chess.com-Link, PGN oder Benutzernamen aus.', 'error');
+    setStatus('Das sieht nicht nach einem Link von chess.com oder Lichess, einem PGN oder einem Benutzernamen aus.', 'error');
+  } catch (e) {
+    reportLoadError(e);
+  }
+}
+
+/** PGN-Text öffnen: eine Partie direkt analysieren, bei mehreren eine Auswahlliste zeigen. */
+function openPgnText(text) {
+  const parts = splitPgn(text);
+  if (parts.length === 1) {
+    startGame(gameFromPgn(parts[0]));
+    return;
+  }
+  const entries = parts.slice(0, 400).map((pgn, i) => ({
+    id: 'pgnfile-' + i,
+    white: { name: pgnTag(pgn, 'White') || 'Weiß', rating: pgnTag(pgn, 'WhiteElo') || null },
+    black: { name: pgnTag(pgn, 'Black') || 'Schwarz', rating: pgnTag(pgn, 'BlackElo') || null },
+    result: pgnTag(pgn, 'Result') || '*', timeClass: '', at: 0, dateText: pgnTag(pgn, 'Date').replace(/\?/g, '').replace(/\.+$/, ''),
+    load: () => gameFromPgn(pgn),
+  }));
+  setStatus('');
+  showGamesList(`${parts.length} Partien in der Datei`, entries, '');
+}
+
+async function openPgnFile(file) {
+  if (!file) return;
+  if (file.size > 20 * 1024 * 1024) {
+    setStatus('Die Datei ist zu groß (maximal 20 MB).', 'error');
+    return;
+  }
+  try {
+    openPgnText(await file.text());
   } catch (e) {
     reportLoadError(e);
   }
@@ -398,42 +469,67 @@ function reportLoadError(e) {
   setStatus(e instanceof LoadError ? e.message : 'Das hat leider nicht geklappt. Bitte versuche es noch einmal.', 'error');
 }
 
-async function showRecentGames(username) {
-  setStatus(`Lade die letzten Partien von ${username} …`, 'busy');
+async function showRecentGames(username, months = 2) {
+  const site = S.site === 'lichess' ? 'Lichess' : 'chess.com';
+  setStatus(`Lade die letzten Partien von ${username} (${site}) …`, 'busy');
   try {
-    const games = await fetchRecentGames(username);
+    const entries = S.site === 'lichess' ? await fetchLichessGames(username, months * 30) : await fetchRecentGames(username, { months, limit: months * 60 });
     setStatus('');
     if (!$('user-input').value.trim()) {
       $('user-input').value = username;
       rememberUser();
     }
-    const me = username.toLowerCase();
-    $('games-title').textContent = `Letzte Partien von ${username}`;
-    const list = $('games-list');
-    list.innerHTML = games.length ? '' : '<li class="game-empty">Keine Partien in den letzten Monaten gefunden.</li>';
-    games.forEach((g) => {
-      const iAmWhite = g.white.username.toLowerCase() === me;
-      const mine = iAmWhite ? g.white : g.black;
-      const res = mine.result === 'win' ? 'win' : ['checkmated', 'resigned', 'timeout', 'abandoned', 'lose'].includes(mine.result) ? 'loss' : 'draw';
-      const li = document.createElement('li');
-      const date = g.end_time ? new Date(g.end_time * 1000).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '';
-      li.innerHTML = `<button type="button" class="game-item">
-        <span class="game-res ${res}">${{ win: 'S', loss: 'N', draw: 'R' }[res]}</span>
-        <span class="game-names">${esc(g.white.username)} <small>(${g.white.rating})</small> – ${esc(g.black.username)} <small>(${g.black.rating})</small></span>
-        <span class="game-meta">${esc(timeClassName(g.time_class))} · ${date}</span></button>`;
-      li.firstChild.onclick = () => {
-        try {
-          startGame(gameFromArchive(g));
-        } catch (e) {
-          reportLoadError(e);
-        }
-      };
-      list.appendChild(li);
-    });
-    $('games-card').hidden = false;
-    $('games-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    showGamesList(`Letzte Partien von ${username}`, entries, username.toLowerCase(), months < 12 ? () => showRecentGames(username, months + 2) : null);
   } catch (e) {
     reportLoadError(e);
+  }
+}
+
+/** Zeigt eine Auswahlliste von Partien mit Filtern (Zeitformat, Farbe, Ergebnis). */
+function showGamesList(title, entries, me, more = null) {
+  S.gamesList = { title, entries, me, more, filter: (S.gamesList && S.gamesList.me === me && S.gamesList.filter) || { tc: '', color: '', res: '' } };
+  $('games-title').textContent = title;
+  renderGamesList();
+  $('games-card').hidden = false;
+  $('games-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function renderGamesList() {
+  const { entries, me, more, filter } = S.gamesList;
+  const analyzed = new Set((S.metas || []).map((m) => m.id));
+  const mine = (g) => (!me ? null : g.white.name.toLowerCase() === me ? 'w' : g.black.name.toLowerCase() === me ? 'b' : null);
+  const outcome = (g) => { const c = mine(g); return !c || g.result === '*' ? null : g.result === '1/2-1/2' ? 'draw' : (g.result === '1-0') === (c === 'w') ? 'win' : 'loss'; };
+  const chip = (key, value, label) => `<button type="button" class="chip ${filter[key] === value ? 'on' : ''}" data-key="${key}" data-value="${value}">${label}</button>`;
+  const classes = [...new Set(entries.map((g) => g.timeClass).filter(Boolean))];
+  $('games-filter').innerHTML = (classes.length > 1 ? chip('tc', '', 'Alle') + classes.map((c) => chip('tc', c, timeClassName(c))).join('') + '<span class="chip-gap"></span>' : '')
+    + (me ? chip('color', '', 'Beide Farben') + chip('color', 'w', 'Weiß') + chip('color', 'b', 'Schwarz') + '<span class="chip-gap"></span>'
+      + chip('res', '', 'Alle Ergebnisse') + chip('res', 'win', 'Siege') + chip('res', 'loss', 'Niederlagen') + chip('res', 'draw', 'Remis') : '');
+  const shown = entries.filter((g) => (!filter.tc || g.timeClass === filter.tc) && (!filter.color || mine(g) === filter.color) && (!filter.res || outcome(g) === filter.res));
+  const list = $('games-list');
+  list.innerHTML = shown.length ? '' : '<li class="game-empty">Keine passenden Partien gefunden.</li>';
+  shown.forEach((g) => {
+    const res = outcome(g) || 'draw';
+    const letter = outcome(g) ? { win: 'S', loss: 'N', draw: 'R' }[res] : (g.result === '1-0' ? '1' : g.result === '0-1' ? '0' : '½');
+    const date = g.at ? new Date(g.at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' }) : (g.dateText || '');
+    const li = document.createElement('li');
+    li.innerHTML = `<button type="button" class="game-item">
+      <span class="game-res ${res}">${letter}</span>
+      <span class="game-names">${esc(g.white.name)} ${g.white.rating ? `<small>(${esc(g.white.rating)})</small>` : ''} – ${esc(g.black.name)} ${g.black.rating ? `<small>(${esc(g.black.rating)})</small>` : ''}</span>
+      <span class="game-meta">${analyzed.has(g.id) ? '<span class="done">✓ analysiert</span> · ' : ''}${esc([timeClassName(g.timeClass), date].filter(Boolean).join(' · '))}</span></button>`;
+    li.firstChild.onclick = () => {
+      try {
+        startGame(g.load());
+      } catch (e) {
+        reportLoadError(e);
+      }
+    };
+    list.appendChild(li);
+  });
+  if (more) {
+    const li = document.createElement('li');
+    li.innerHTML = '<button type="button" class="game-item more">Ältere Partien laden</button>';
+    li.firstChild.onclick = more;
+    list.appendChild(li);
   }
 }
 
@@ -500,6 +596,15 @@ async function routeFromHash() {
   }
   if (id === 'analyse') {
     showAnalyze();
+    return;
+  }
+  if (id.startsWith('pgn=')) {
+    try {
+      startGame(gameFromPgn(await unpackPgn(id.slice(4))));
+    } catch (e) {
+      showAnalyze();
+      reportLoadError(e);
+    }
     return;
   }
   if (id === 'lektionen') {
@@ -675,6 +780,54 @@ function enterPlayView() {
   soloPane('pane-play', 'play', 'Gegen den Computer');
 }
 
+/** Kurzfassung der Analyse als Text (zum Kopieren und Teilen). */
+function summaryText() {
+  const { game, review } = S;
+  const sum = S.summary;
+  const acc = (c) => (review.accuracy[c] == null ? '–' : review.accuracy[c].toFixed(1) + ' %');
+  const lines = [
+    `${game.white.name} – ${game.black.name}: ${game.result.replace('1/2-1/2', '½–½')}`,
+    `Genauigkeit: ${game.white.name} ${acc('w')}, ${game.black.name} ${acc('b')}`,
+  ];
+  if (review.opening) lines.push(`Eröffnung: ${review.opening.name}`);
+  lines.push([sum.text, sum.keyText].filter(Boolean).join(' '));
+  for (const t of sum.tips) lines.push(`${t.who}: ${t.items.join(' ')}`);
+  return lines.join('\n');
+}
+
+/** Zeichnet die aktuelle Stellung als Bild und lädt es herunter. */
+async function boardPng() {
+  const size = 960, sq = size / 8;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const g = canvas.getContext('2d');
+  const t = THEMES[S.settings.theme] || THEMES.green;
+  const flip = S.orientation === 'b';
+  for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) {
+    g.fillStyle = (r + f) % 2 ? t.dark : t.light;
+    g.fillRect(f * sq, r * sq, sq, sq);
+  }
+  g.font = `700 ${sq * 0.17}px system-ui, sans-serif`;
+  for (let i = 0; i < 8; i++) {
+    g.fillStyle = i % 2 ? t.light : t.dark;
+    g.fillText(String(flip ? i + 1 : 8 - i), 5, i * sq + sq * 0.2);
+    g.fillStyle = i % 2 ? t.dark : t.light;
+    g.fillText('abcdefgh'[flip ? 7 - i : i], i * sq + sq * 0.86, size - 6);
+  }
+  const pieces = [...Board.parseFen(currentFen())];
+  await Promise.all(pieces.map(([square, code]) => new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const f = square.charCodeAt(0) - 97, r = +square[1] - 1;
+      g.drawImage(img, (flip ? 7 - f : f) * sq, (flip ? r : 7 - r) * sq, sq, sq);
+      resolve();
+    };
+    img.onerror = resolve;
+    img.src = `assets/pieces/${S.settings.pieces}/${code}.svg`;
+  })));
+  canvas.toBlob((blob) => blob && download(blob, 'stellung.png'), 'image/png');
+}
+
 /** Lädt eine Datei im Browser herunter. */
 function download(blob, name) {
   const a = document.createElement('a');
@@ -775,16 +928,16 @@ async function runEngine(game, book, depth, pool, onProgress) {
 
 /** Analysiert die letzten Partien des Nutzers nacheinander im Hintergrund (für das Schwächenprofil). */
 async function batchAnalyze(n, report) {
-  const archive = await fetchRecentGames(S.username, { months: 4 });
+  const entries = S.site === 'lichess' ? await fetchLichessGames(S.username, n * 3) : await fetchRecentGames(S.username, { months: 4, limit: 200 });
   const book = await loadBook();
   const me = S.username.toLowerCase();
   const list = [];
-  for (const a of archive) {
+  for (const e of entries) {
     if (list.length >= n) break;
+    if (await db.get('meta', e.id)) continue;
     try {
-      const game = gameFromArchive(a);
-      if (!(await db.get('meta', game.id))) list.push(game);
-    } catch (e) { /* Varianten überspringen */ }
+      list.push(e.load());
+    } catch (err) { /* Varianten überspringen */ }
   }
   if (!list.length) {
     report(1, 1, 'Deine letzten Partien sind schon alle analysiert.');
@@ -997,6 +1150,8 @@ function renderOverview() {
   $('phases').innerHTML = phaseRows.length ? `<h3>Partiephasen</h3><table class="counts">${phaseRows.map((r) =>
     `<tr><td class="n">${r.w ? classIcon(r.w, 20) : '–'}</td><td class="pct">${r.wAcc == null ? '' : r.wAcc.toFixed(0) + ' %'}</td><td class="lbl mid">${r.name}</td><td class="pct">${r.bAcc == null ? '' : r.bAcc.toFixed(0) + ' %'}</td><td class="n">${r.b ? classIcon(r.b, 20) : '–'}</td></tr>`).join('')}</table>` : '';
   renderTimeBox();
+  $('ov-actions').innerHTML = [['summary', 'Fazit kopieren'], ['pgn', 'PGN herunterladen'], ['share', 'Link zum Teilen kopieren'], ['png', 'Brett als Bild']]
+    .map(([act, label]) => `<button type="button" class="btn soft small" data-act="${act}">${label}</button>`).join('');
   $('moments').innerHTML = sum.moments.length ? `<h3>Schlüsselmomente</h3><div class="moment-list">${sum.moments.map((m) =>
     `<button type="button" class="moment" data-ply="${m.ply}">${classIcon(m.cls, 18)}<b>${esc(m.label)}</b><span>${CLASSES[m.cls].label}</span></button>`).join('')}</div>` : '';
   $('tips').innerHTML = sum.tips.map((t) =>

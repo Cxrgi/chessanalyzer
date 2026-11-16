@@ -340,8 +340,8 @@ export async function loadByLink(link, { username, onStatus, deep = false } = {}
   throw new LoadError('needuser', 'Für diesen Link wird dein chess.com-Benutzername gebraucht.');
 }
 
-/** Die letzten Partien eines Spielers (für die Auswahlliste). */
-export async function fetchRecentGames(username, { months = 2 } = {}) {
+/** Die letzten Partien eines Spielers als einheitliche Listeneinträge (für die Auswahlliste). */
+export async function fetchRecentGames(username, { months = 2, limit = 60, raw = false } = {}) {
   const archives = (await fetchArchiveList(username)).slice().reverse().slice(0, months);
   const games = [];
   for (const url of archives) {
@@ -349,12 +349,17 @@ export async function fetchRecentGames(username, { months = 2 } = {}) {
       const data = await fetchJson(url, { timeout: 20000 });
       games.push(...(data.games || []));
     } catch (e) { /* Monat überspringen */ }
-    if (games.length >= 30) break;
+    if (games.length >= limit) break;
   }
-  return games
-    .filter((g) => !g.rules || g.rules === 'chess')
-    .sort((a, b) => (b.end_time || 0) - (a.end_time || 0))
-    .slice(0, 50);
+  const list = games.filter((g) => !g.rules || g.rules === 'chess').sort((a, b) => (b.end_time || 0) - (a.end_time || 0)).slice(0, limit);
+  if (raw) return list;
+  return list.map((g) => ({
+    id: `${/\/daily\//.test(g.url) ? 'daily' : 'live'}-${g.url.split('/').pop()}`,
+    white: { name: g.white.username, rating: g.white.rating }, black: { name: g.black.username, rating: g.black.rating },
+    result: g.white.result === 'win' ? '1-0' : g.black.result === 'win' ? '0-1' : '1/2-1/2',
+    timeClass: g.time_class || '', at: (g.end_time || 0) * 1000, more: archives.length >= months,
+    load: () => gameFromArchive(g),
+  }));
 }
 
 /** Profilbild eines Spielers (optional, Fehler werden ignoriert). */

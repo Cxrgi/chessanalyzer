@@ -84,10 +84,10 @@ export async function renderProfile() {
 
   // --- Stapelanalyse ---
   html += `<section class="pf-card"><h2>Mehrere Partien auf einmal analysieren</h2>
-    <p class="hint">Lädt deine letzten chess.com-Partien und analysiert sie nacheinander im Hintergrund. Je mehr Partien, desto genauer wird dein Schwächenprofil.</p>
+    <p class="hint">Lädt deine letzten Partien (chess.com oder Lichess, je nach Auswahl unter „Partie analysieren“) und analysiert sie nacheinander im Hintergrund. Je mehr Partien, desto genauer wird dein Schwächenprofil.</p>
     <div class="pf-row" id="batch-row">${batch
     ? `<div class="progress"><div class="progress-fill" style="width:${(batch.done / batch.total) * 100}%"></div></div><span>${esc(batch.text)}</span><button type="button" class="btn ghost small" data-act="batch-stop">Abbrechen</button>`
-    : `<button type="button" class="btn primary small" data-act="batch" data-n="5">Letzte 5</button><button type="button" class="btn soft small" data-act="batch" data-n="10">Letzte 10</button><button type="button" class="btn soft small" data-act="batch" data-n="20">Letzte 20</button><span class="hint" id="batch-msg">${d.username() ? `für „${esc(d.username())}“` : 'Trag zuerst unter „Partie analysieren“ deinen chess.com-Namen ein.'}</span>`}</div></section>`;
+    : `<button type="button" class="btn primary small" data-act="batch" data-n="5">Letzte 5</button><button type="button" class="btn soft small" data-act="batch" data-n="10">Letzte 10</button><button type="button" class="btn soft small" data-act="batch" data-n="20">Letzte 20</button><span class="hint" id="batch-msg">${d.username() ? `für „${esc(d.username())}“` : 'Trag zuerst unter „Partie analysieren“ deinen Benutzernamen ein.'}</span>`}</div></section>`;
 
   if (mine.length) {
     // --- Fehlerarten ---
