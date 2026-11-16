@@ -11,13 +11,18 @@ const adapter = {
 };
 
 export default async (request, context) => {
-  const response = await handleGate(request, { store: adapter, ip: context.ip });
+  const response = await handleGate(request, {
+    store: adapter,
+    ip: context.ip,
+    setupToken: Netlify.env.get('SETUP_TOKEN') || '',
+    open: Netlify.env.get('REQUIRE_LOGIN') === 'false',
+  });
   return response || undefined; // undefined = Anfrage geht normal weiter
 };
 
-// Bilder, Engine und Stylesheet bleiben frei – ohne Seite und Skripte sind sie nutzlos,
-// und so läuft nicht jede Datei durch die Edge Function.
+// Bilder, Engine, Stylesheet und die frei lizenzierten Daten (Eröffnungen, Aufgaben) bleiben offen –
+// ohne Seite und Skripte sind sie nutzlos, und so läuft nicht jede Datei durch die Edge Function.
 export const config = {
   path: '/*',
-  excludedPath: ['/vendor/*', '/assets/*', '/css/*', '/.netlify/*'],
+  excludedPath: ['/vendor/*', '/assets/*', '/css/*', '/data/*', '/manifest.webmanifest', '/.netlify/*'],
 };

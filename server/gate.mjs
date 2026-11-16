@@ -8,15 +8,16 @@ import { loginPage } from './login-page.mjs';
 
 const COOKIE = 'ca_session';
 const SESSION_DAYS = 30;
-const ITERATIONS = 20000;
+const ITERATIONS = 30000; // für neue Hashes; ältere Einträge merken sich ihre eigene Zahl (cfg.iter)
+const LEGACY_ITERATIONS = 20000;
 const enc = new TextEncoder();
 
 const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const randomToken = (bytes) => b64(crypto.getRandomValues(new Uint8Array(bytes)));
 
-async function hashSecret(secret, salt) {
+async function hashSecret(secret, salt, iterations = ITERATIONS) {
   const key = await crypto.subtle.importKey('raw', enc.encode(secret), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: enc.encode(salt), iterations: ITERATIONS }, key, 256);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: enc.encode(salt), iterations }, key, 256);
   return b64(bits);
 }
 
@@ -72,11 +73,16 @@ function blocked(ip) {
   const f = fails.get(ip);
   return !!f && f.count >= 8 && Date.now() - f.at < 10 * 60000;
 }
+/** Zählt einen Fehlversuch und gibt die Wartezeit zurück – sie verdoppelt sich mit jedem weiteren Versuch. */
 function noteFail(ip) {
-  const f = fails.get(ip);
-  if (!f || Date.now() - f.at > 10 * 60000) fails.set(ip, { count: 1, at: Date.now() });
-  else f.count++;
+  let f = fails.get(ip);
+  if (!f || Date.now() - f.at > 10 * 60000) {
+    f = { count: 0, at: Date.now() };
+    fails.set(ip, f);
+  }
+  f.count++;
   if (fails.size > 500) fails.clear();
+  return Math.min(400 * 2 ** (f.count - 1), 6000);
 }
 
 const recoveryCode = () => {
@@ -97,10 +103,11 @@ async function newConfig(password, keep = {}) {
     cfg: {
       v: 1,
       salt,
+      iter: ITERATIONS,
       hash: await hashSecret(password, salt),
       secret: keep.secret || randomToken(32),
       recoverySalt,
-      recoveryHash: await hashSecret(cleanCode(code), recoverySalt),
+      recoveryHash: await hashSecret(cleanCode(code), recoverySalt, LEGACY_ITERATIONS),
       created: new Date().toISOString(),
     },
     code,
@@ -110,7 +117,7 @@ async function newConfig(password, keep = {}) {
 async function authApi(request, url, env, cfg, authed) {
   const action = url.pathname.slice('/api/auth/'.length);
   const { store, ip = 'local' } = env;
-  if (action === 'status') return json({ configured: !!cfg, authenticated: authed });
+  if (action === 'status') return json({ configured: !!cfg, authenticated: authed, needsToken: !cfg && !!env.setupToken });
   if (request.method !== 'POST') return json({ error: 'method' }, 405);
   let body = {};
   try {
@@ -121,6 +128,11 @@ async function authApi(request, url, env, cfg, authed) {
 
   if (action === 'setup') {
     if (cfg) return json({ error: 'configured' }, 409);
+    // Optionaler Einrichtungs-Code (Umgebungsvariable SETUP_TOKEN): Ohne ihn kann niemand die Seite übernehmen.
+    if (env.setupToken && !sameText(String(body.token || ''), env.setupToken)) {
+      await sleep(noteFail(ip));
+      return json({ error: 'token' }, 403);
+    }
     if (!goodPassword(body.password)) return json({ error: 'weak' }, 400);
     const made = await newConfig(body.password);
     await store.set(made.cfg);
@@ -131,10 +143,10 @@ async function authApi(request, url, env, cfg, authed) {
   if (!cfg) return json({ error: 'unconfigured' }, 409);
   if (blocked(ip)) return json({ error: 'locked' }, 429);
 
+  const iter = cfg.iter || LEGACY_ITERATIONS;
   if (action === 'login') {
-    if (!sameText(await hashSecret(String(body.password || ''), cfg.salt), cfg.hash)) {
-      noteFail(ip);
-      await sleep(400);
+    if (!sameText(await hashSecret(String(body.password || ''), cfg.salt, iter), cfg.hash)) {
+      await sleep(noteFail(ip));
       return json({ error: 'wrong' }, 401);
     }
     fails.delete(ip);
@@ -143,9 +155,8 @@ async function authApi(request, url, env, cfg, authed) {
 
   if (action === 'reset') {
     // „Passwort vergessen“: Mit dem Notfall-Code wird der Schutz zurückgesetzt, danach neu einrichten.
-    if (!sameText(await hashSecret(cleanCode(body.recovery), cfg.recoverySalt), cfg.recoveryHash)) {
-      noteFail(ip);
-      await sleep(400);
+    if (!sameText(await hashSecret(cleanCode(body.recovery), cfg.recoverySalt, LEGACY_ITERATIONS), cfg.recoveryHash)) {
+      await sleep(noteFail(ip));
       return json({ error: 'wrong' }, 401);
     }
     await store.delete();
@@ -155,17 +166,26 @@ async function authApi(request, url, env, cfg, authed) {
 
   if (action === 'password') {
     if (!authed) return json({ error: 'auth' }, 401);
-    if (!sameText(await hashSecret(String(body.current || ''), cfg.salt), cfg.hash)) {
-      noteFail(ip);
-      await sleep(400);
+    if (!sameText(await hashSecret(String(body.current || ''), cfg.salt, iter), cfg.hash)) {
+      await sleep(noteFail(ip));
       return json({ error: 'wrong' }, 401);
     }
     if (!goodPassword(body.next)) return json({ error: 'weak' }, 400);
+    // Neues Passwort = neues Sitzungsgeheimnis: Alle anderen Geräte sind damit abgemeldet.
     const salt = randomToken(16);
-    const next = { ...cfg, salt, hash: await hashSecret(body.next, salt) };
+    const next = { ...cfg, salt, iter: ITERATIONS, hash: await hashSecret(body.next, salt), secret: randomToken(32) };
     await store.set(next);
     cache = { cfg: next, at: Date.now() };
-    return json({ ok: true });
+    return json({ ok: true }, 200, { 'Set-Cookie': cookieHeader(request, await makeSession(next.secret), SESSION_DAYS * 86400) });
+  }
+
+  if (action === 'logout-all') {
+    // „Überall abmelden“: neues Sitzungsgeheimnis, nur dieses Gerät bekommt eine frische Sitzung.
+    if (!authed) return json({ error: 'auth' }, 401);
+    const next = { ...cfg, secret: randomToken(32) };
+    await store.set(next);
+    cache = { cfg: next, at: Date.now() };
+    return json({ ok: true }, 200, { 'Set-Cookie': cookieHeader(request, await makeSession(next.secret), SESSION_DAYS * 86400) });
   }
   return json({ error: 'unknown' }, 404);
 }
@@ -173,12 +193,14 @@ async function authApi(request, url, env, cfg, authed) {
 /**
  * Prüft eine Anfrage.
  * @param request Web-Request
- * @param env     { store: { get(), set(cfg), delete() }, ip }
+ * @param env     { store: { get(), set(cfg), delete() }, ip, setupToken?, open? }
+ *                open = true schaltet den Schutz ab (Umgebungsvariable REQUIRE_LOGIN=false).
  * @returns Response (Anmeldeseite, API-Antwort oder 401) – oder null, wenn die Anfrage durchgelassen wird.
  */
 export async function handleGate(request, env) {
   const url = new URL(request.url);
   const isAuthApi = url.pathname.startsWith('/api/auth/');
+  if (env.open) return isAuthApi ? json({ configured: false, authenticated: true, open: true }) : null;
   let cfg = await loadConfig(env.store, isAuthApi);
   const token = readCookie(request);
   let authed = !!cfg && !!token && (await validSession(token, cfg.secret));
@@ -195,9 +217,13 @@ export async function handleGate(request, env) {
     && (url.pathname === '/' || url.pathname.endsWith('.html') || (request.headers.get('accept') || '').includes('text/html'));
   if (wantsPage) {
     if (!cfg) cfg = await loadConfig(env.store, true);
-    return new Response(loginPage(cfg ? 'login' : 'setup'), {
+    const nonce = randomToken(12);
+    return new Response(loginPage(cfg ? 'login' : 'setup', { nonce, needsToken: !cfg && !!env.setupToken }), {
       status: 200,
-      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' },
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex',
+        'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
+      },
     });
   }
   return json({ error: 'auth' }, 401);

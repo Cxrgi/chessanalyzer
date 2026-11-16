@@ -90,6 +90,14 @@ function sacrificeValue(fenAfter, move) {
   return offered - got;
 }
 
+/** Anzahl der Züge vom Partiebeginn an, die im Eröffnungsbuch stehen. */
+export function bookMoves(game, book) {
+  if (!book || !game.startFen.startsWith('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq')) return 0;
+  let k = 0;
+  while (k < game.moves.length && k < 40 && book.book[positionKey(game.fens[k + 1])] !== undefined) k++;
+  return k;
+}
+
 /**
  * @param game       Partie (moves, fens)
  * @param positions  Engine-Ergebnis je Stellung: { lines: [{move, pv, eval}], eval }

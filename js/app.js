@@ -2,10 +2,13 @@
 import { Chess } from '../vendor/chess.js';
 import { openEditor, bindEditor } from './editor.js';
 import { initPuzzles, openPuzzles, puzzleTargets, puzzleMove, puzzleKey, puzzleSummary, leavePuzzles } from './puzzles.js';
+import { initPlay, openPlay, playTargets, playMove, leavePlay } from './play.js';
 import { initLessons, renderLessonList, openLesson, lessonTargets, lessonMove, lessonKey, lessonProgress } from './lessons.js';
 import { Board } from './board.js';
-import { AnalysisPool, LiveEngine } from './engine.js';
-import { reviewGame, winPct, evalText, CLASSES, CLASS_ORDER, BAD } from './analysis.js';
+import { AnalysisPool, LiveEngine, warmEngine } from './engine.js';
+import { db, migrateLegacy } from './db.js';
+import { gameSummary, mistakeCards, timeReport, timeSpent } from './insights.js';
+import { reviewGame, bookMoves, winPct, evalText, CLASSES, CLASS_ORDER, BAD } from './analysis.js';
 import { explainMove, summarize, resultText, describeMove, pvToMoves, lineText, sanDe, say } from './coach.js';
 import { parseGameLink, loadByLink, gameFromPgn, gameFromArchive, fetchRecentGames, fetchAvatar, LoadError } from './chesscom.js';
 import { materialInfo } from './tactics.js';
@@ -86,11 +89,17 @@ function init() {
   buildStaticIcons();
   buildSettingsDialog();
   bindEvents();
-  renderHistory();
+  migrateLegacy().catch(() => {}).then(renderHistory);
   $('user-input').value = S.username;
   bindEditor({ board, $, setCoach, uiIcon, copyText, pieceSet: () => S.settings.pieces, onPlay: (fen) => openBoard(fen), onCancel: closeEditor });
   initLessons({ board, $, setCoach, store, uiIcon, esc, playSound, enterLessonView });
   initPuzzles({ board, $, setCoach, store, playSound, enterPuzzleView, openBoard: (fen, ucis) => openBoard(fen, ucis, 1) });
+  initPlay({
+    board, $, setCoach, store, uiIcon, playSound, enterPlayView, san: sanDe, username: () => S.username,
+    evaluate: (fen) => live.evaluate(fen, 12),
+    analyze: (pgn, you) => { const g = gameFromPgn(pgn); g.youHint = you; startGame(g); },
+    onResult: (r) => bump(r.scenario ? 'endgames' : 'played', r),
+  });
   initAccount();
   routeFromHash();
   watchHostBadge();
@@ -204,7 +213,7 @@ function bindEvents() {
     const t = e.target.closest('.tile');
     if (!t) return;
     const go = t.dataset.go;
-    if (go === 'analyse' || go === 'lektionen' || go === 'brett' || go === 'aufgaben') location.hash = '#' + go;
+    if (['analyse', 'lektionen', 'brett', 'aufgaben', 'spielen', 'training', 'profil', 'trainer'].includes(go)) location.hash = '#' + go;
     else if (go === 'editor') { openBoard(); showEditor(currentFen()); }
     else if (go === 'demo') startGame(gameFromPgn(DEMO_PGN));
     else if (go === 'recent') {
@@ -292,8 +301,8 @@ function bindEvents() {
     if (e.key === 'ArrowRight') {
       if (S.view === 'overview') { showMoves(); go(0); } else next();
     } else if (e.key === 'ArrowLeft') prev();
-    else if (e.key === 'Home' || e.key === 'ArrowUp') $('ctl-first').click();
-    else if (e.key === 'End' || e.key === 'ArrowDown') $('ctl-last').click();
+    else if (e.key === 'Home') $('ctl-first').click();
+    else if (e.key === 'End') $('ctl-last').click();
     else if (e.key.toLowerCase() === 'f') flip();
     else if (e.key.toLowerCase() === 'n' && S.view === 'moves' && S.mode === 'game') nextKey();
     else return;
@@ -421,31 +430,54 @@ function timeClassName(tc) {
   return { bullet: 'Bullet', blitz: 'Blitz', rapid: 'Schnellschach', daily: 'Fernschach' }[tc] || '';
 }
 
-function renderHistory() {
-  const hist = store.get('history', []);
-  $('history-card').hidden = !hist.length;
-  $('history-list').innerHTML = hist.map((h) => `<li><button type="button" class="game-item" data-id="${esc(h.id)}">
-      <span class="game-res draw">${h.result === '1-0' ? '1' : h.result === '0-1' ? '0' : '½'}</span>
-      <span class="game-names">${esc(h.white)} – ${esc(h.black)}</span>
-      <span class="game-meta">${esc(h.date || '')}</span></button></li>`).join('');
-  $('history-list').onclick = (e) => {
-    const b = e.target.closest('.game-item');
-    if (b) location.hash = '#' + b.dataset.id;
+async function renderHistory() {
+  const metas = (await db.all('meta').catch(() => [])).map((e) => e.value).sort((x, y) => (y.fav ? 1 : 0) - (x.fav ? 1 : 0) || y.at - x.at);
+  S.metas = metas;
+  $('history-card').hidden = !metas.length;
+  const shown = S.historyAll ? metas : metas.slice(0, 8);
+  $('history-list').innerHTML = shown.map((h) => {
+    const mine = h.you ? h.acc && h.acc[h.you] : null;
+    const res = !h.you ? 'draw' : (h.result === '1/2-1/2' ? 'draw' : (h.result === '1-0') === (h.you === 'w') ? 'win' : 'loss');
+    const letter = h.you ? { win: 'S', loss: 'N', draw: 'R' }[res] : (h.result === '1-0' ? '1' : h.result === '0-1' ? '0' : '½');
+    const info = [h.opening, mine != null ? `${mine.toFixed(0)} % genau` : '', h.date ? h.date.split('-').reverse().join('.') : ''].filter(Boolean).join(' · ');
+    return `<li class="hist-row"><button type="button" class="game-item" data-id="${esc(h.id)}">
+      <span class="game-res ${res}">${letter}</span>
+      <span class="game-names">${esc(h.white)} – ${esc(h.black)}<small class="game-sub">${esc(info)}</small></span></button>
+      <button type="button" class="icon-btn hist-fav ${h.fav ? 'on' : ''}" data-fav="${esc(h.id)}" title="Merken" aria-label="Partie merken">${uiIcon('star', 16)}</button>
+      <button type="button" class="icon-btn" data-del="${esc(h.id)}" title="Löschen" aria-label="Partie löschen">${uiIcon('trash', 16)}</button></li>`;
+  }).join('') + (metas.length > 8 && !S.historyAll ? `<li><button type="button" class="game-item more" data-more="1">Alle ${metas.length} Partien anzeigen</button></li>` : '');
+  $('history-list').onclick = async (e) => {
+    const fav = e.target.closest('[data-fav]'), del = e.target.closest('[data-del]');
+    if (fav) {
+      const m = metas.find((x) => x.id === fav.dataset.fav);
+      m.fav = !m.fav;
+      await db.set('meta', m.id, m);
+      renderHistory();
+    } else if (del) {
+      await Promise.all([db.del('meta', del.dataset.del), db.del('games', del.dataset.del)]);
+      renderHistory();
+    } else if (e.target.closest('[data-more]')) {
+      S.historyAll = true;
+      renderHistory();
+    } else {
+      const b = e.target.closest('.game-item');
+      if (b) location.hash = '#' + b.dataset.id;
+    }
   };
 }
 
-function saveToHistory(game, positions, depth) {
-  const hist = store.get('history', []).filter((h) => h.id !== game.id);
-  hist.unshift({ id: game.id, white: game.white.name, black: game.black.name, result: game.result, date: game.date });
-  const slim = positions.map((p) => ({
-    ...p,
-    lines: p.lines.map((l) => ({ ...l, pv: l.pv.slice(0, 12) })),
-  }));
-  while (hist.length > 12) store.del('g.' + hist.pop().id);
-  while (!store.set('g.' + game.id, { game, positions: slim, depth }) && hist.length > 1) {
-    store.del('g.' + hist.pop().id);
+/** Speichert Partie, Engine-Ergebnisse und Kurzfassung – und legt Trainingskarten für eigene Fehler an. */
+async function saveGame(game, positions, depth) {
+  const slim = positions.map((p) => ({ lines: p.lines.map((l) => ({ ...l, pv: l.pv.slice(0, 12) })), eval: p.eval, terminal: p.terminal, book: p.book }));
+  const old = await db.get('meta', game.id).catch(() => null);
+  const summary = { ...gameSummary(ctx()), fav: old ? old.fav : false, at: old ? old.at : Date.now() };
+  await db.set('games', game.id, { game, positions: slim, depth, at: summary.at });
+  await db.set('meta', game.id, summary);
+  if (S.you) {
+    const known = new Set((await db.all('cards')).map((c) => c.key));
+    const fresh = mistakeCards(ctx(), S.you).filter((c) => !known.has(c.id));
+    if (fresh.length) await db.setMany('cards', fresh.map((c) => [c.id, c]));
   }
-  store.set('history', hist);
 }
 
 async function routeFromHash() {
@@ -460,6 +492,13 @@ async function routeFromHash() {
   }
   if (id === 'lektionen') {
     showLessons();
+    return;
+  }
+  if (id === 'spielen') {
+    if (S.mode !== 'play') {
+      leaveModes();
+      openPlay();
+    }
     return;
   }
   if (id === 'aufgaben') {
@@ -479,7 +518,7 @@ async function routeFromHash() {
     return;
   }
   if (S.game && S.game.id === id) return;
-  const cached = store.get('g.' + id, null);
+  const cached = await db.get('games', id).catch(() => null);
   if (cached && cached.game && cached.positions) {
     startGame(cached.game, cached);
     return;
@@ -492,6 +531,16 @@ async function routeFromHash() {
       reportLoadError(e);
     }
   }
+}
+
+/** Hält den Bildschirm während einer langen Analyse wach (wo der Browser das erlaubt). */
+function keepAwake() {
+  let lock = null;
+  let released = false;
+  if (navigator.wakeLock) {
+    navigator.wakeLock.request('screen').then((l) => { if (released) l.release(); else lock = l; }).catch(() => {});
+  }
+  return { release() { released = true; if (lock) lock.release().catch(() => {}); } };
 }
 
 /** Zeigt genau einen Hauptbereich: hub | home | lessons | review. */
@@ -512,9 +561,10 @@ function leaveModes() {
   board.setInteractive(false);
   document.querySelector('.panel').classList.remove('is-editor');
   $('review').classList.remove('lesson-mode');
-  $('pane-editor').hidden = $('pane-lesson').hidden = $('pane-puzzle').hidden = true;
+  for (const id of ['pane-editor', 'pane-lesson', 'pane-puzzle', 'pane-play']) $(id).hidden = true;
   $('coach').hidden = false;
   leavePuzzles();
+  leavePlay();
   S.game = S.review = S.variation = S.retry = null;
 }
 
@@ -546,6 +596,7 @@ function showAnalyze() {
   leaveModes();
   S.view = 'home';
   showMain('home');
+  warmEngine();
   setStatus('');
   document.title = 'Partie analysieren · Chess Analyzer';
   window.scrollTo(0, 0);
@@ -575,6 +626,34 @@ function enterLessonView(title) {
   window.scrollTo(0, 0);
 }
 
+/** Blendet alle Bereiche der Seitenleiste aus und zeigt nur den gewünschten (Brett ohne Bewertungsleiste). */
+function soloPane(id, mode, title) {
+  S.mode = mode;
+  S.view = mode;
+  showMain('review');
+  $('review').classList.add('lesson-mode');
+  for (const p of ['pane-progress', 'pane-overview', 'pane-moves', 'pane-editor', 'pane-lesson', 'pane-puzzle', 'pane-play']) $(p).hidden = p !== id;
+  $('controls').hidden = true;
+  document.title = `${title} · Chess Analyzer`;
+  window.scrollTo(0, 0);
+}
+
+function enterPlayView() {
+  soloPane('pane-play', 'play', 'Gegen den Computer');
+}
+
+/** Zählt Aktivität für Tagesziel und Statistik (pro Kalendertag). */
+function bump(kind, info) {
+  const day = new Date().toISOString().slice(0, 10);
+  const act = store.get('activity', {});
+  act[day] = act[day] || {};
+  act[day][kind] = (act[day][kind] || 0) + 1;
+  const days = Object.keys(act).sort();
+  while (days.length > 120) delete act[days.shift()];
+  store.set('activity', act);
+  if (kind === 'played' && info && info.won) store.set('wins', Math.max(store.get('wins', 0), info.level));
+}
+
 /** Bereitet die Brettansicht für die Taktikaufgaben vor (wird vom Aufgaben-Modul aufgerufen). */
 function enterPuzzleView() {
   S.mode = 'puzzle';
@@ -596,6 +675,10 @@ async function initAccount() {
     if (res.ok) status = await res.json();
   } catch (e) { /* kein Passwortschutz auf diesem Server */ }
   if (!status || !status.configured) return;
+  $('pw-logout-all').onclick = async (e) => {
+    const res = await fetch('api/auth/logout-all', { method: 'POST' }).catch(() => null);
+    e.currentTarget.textContent = res && res.ok ? 'Erledigt – nur dieses Gerät ist noch angemeldet' : 'Das hat nicht geklappt';
+  };
   $('btn-logout').hidden = false;
   $('pw-box').hidden = false;
   $('btn-logout').onclick = async () => {
@@ -611,7 +694,7 @@ async function initAccount() {
     }).catch(() => null);
     const data = res ? await res.json().catch(() => ({})) : {};
     if (res && res.ok) {
-      msg.textContent = 'Passwort geändert.';
+      msg.textContent = 'Passwort geändert. Alle anderen Geräte wurden abgemeldet.';
       $('pw-current').value = $('pw-next').value = '';
     } else {
       msg.textContent = { wrong: 'Das aktuelle Passwort stimmt nicht.', weak: 'Das neue Passwort braucht mindestens 6 Zeichen.', locked: 'Zu viele Versuche. Bitte warte ein paar Minuten.' }[data.error] || 'Das hat nicht geklappt.';
@@ -648,7 +731,7 @@ async function startGame(game, cached) {
   S.ply = 0;
   S.view = 'analyzing';
   const me = S.username.toLowerCase();
-  S.you = !me ? null : game.white.name.toLowerCase() === me ? 'w' : game.black.name.toLowerCase() === me ? 'b' : null;
+  S.you = game.youHint || (!me ? null : game.white.name.toLowerCase() === me ? 'w' : game.black.name.toLowerCase() === me ? 'b' : null);
   S.orientation = S.you === 'b' ? 'b' : 'w';
   board.setOrientation(S.orientation);
 
@@ -672,17 +755,32 @@ async function startGame(game, cached) {
   });
   loadAvatars(game);
 
-  const bookPromise = loadBook();
+  const book = await loadBook();
+  if (S.game !== game) return;
   let positions;
-  if (cached && cached.positions.length === game.fens.length) {
+  // Gespeicherte Analyse nur verwenden, wenn sie mindestens so tief gerechnet wurde wie jetzt eingestellt
+  if (cached && cached.positions.length === game.fens.length && (cached.depth || 0) >= S.settings.depth) {
     positions = cached.positions;
   } else {
+    const depth = S.settings.depth;
+    const known = {};
+    // 1) Buchzüge brauchen keine Engine: Stellungen vor dem letzten Theoriezug überspringen
+    const nBook = bookMoves(game, book);
+    for (let i = 0; i < nBook; i++) known[i] = { lines: [], eval: { type: 'cp', value: 20 }, book: true };
+    // 2) Stellungen, die schon einmal in dieser Tiefe gerechnet wurden, aus dem Speicher holen
+    const keyOf = (fen) => `${fen.split(' ').slice(0, 4).join(' ')}|${depth}`;
+    const hits = await db.getMany('evals', game.fens.map(keyOf)).catch(() => new Map());
+    game.fens.forEach((fen, i) => {
+      if (!known[i] && hits.has(keyOf(fen))) known[i] = hits.get(keyOf(fen));
+    });
     const pool = new AnalysisPool();
     S.pool = pool;
     let shown = 0;
+    const wake = keepAwake();
     try {
       positions = await pool.analyze(game.fens, {
-        depth: S.settings.depth,
+        depth,
+        known,
         onProgress: (done, total, index) => {
           if (S.pool !== pool) return;
           $('progress-fill').style.width = `${(done / total) * 100}%`;
@@ -694,6 +792,7 @@ async function startGame(game, cached) {
         },
       });
     } catch (e) {
+      wake.release();
       if (S.pool !== pool) return; // abgebrochen
       console.error(e);
       setCoach({
@@ -703,15 +802,24 @@ async function startGame(game, cached) {
       $('progress-label').textContent = String(e.message || e);
       return;
     }
+    wake.release();
     if (S.pool !== pool) return;
     S.pool = null;
-    saveToHistory(game, positions, S.settings.depth);
+    const fresh = [];
+    positions.forEach((p, i) => {
+      if (p.fresh) fresh.push([keyOf(game.fens[i]), { lines: p.lines.map((l) => ({ ...l, pv: l.pv.slice(0, 12) })), eval: p.eval }]);
+    });
+    db.setMany('evals', fresh).catch(() => {});
+    cached = null;
+    if (document.hidden) playSound('end');
   }
-  const book = await bookPromise;
+  // Remis durch Stellungswiederholung oder 50-Züge-Regel: Die Schlussstellung ist remis, egal was die Engine meint
+  if (game.drawn) positions[positions.length - 1] = { lines: [], eval: { type: 'cp', value: 0 }, terminal: 'draw' };
   if (S.game !== game) return;
   S.review = reviewGame(game, positions, book);
   buildMoveList();
   showOverview();
+  saveGame(game, positions, (cached && cached.depth) || S.settings.depth).catch((e) => console.error(e));
 }
 
 async function loadAvatars(game) {
@@ -774,6 +882,7 @@ function setYou(color) {
   board.setOrientation(color);
   S.review.diag = null;
   showOverview();
+  db.get('games', S.game.id).then((g) => g && saveGame(S.game, g.positions, g.depth)).catch(() => {});
 }
 
 function showMoves() {
@@ -806,7 +915,8 @@ function renderOverview() {
   const sum = S.summary;
   const phaseRows = sum.phases.filter((r) => r.w || r.b);
   $('phases').innerHTML = phaseRows.length ? `<h3>Partiephasen</h3><table class="counts">${phaseRows.map((r) =>
-    `<tr><td class="n">${r.w ? classIcon(r.w, 20) : '–'}</td><td class="lbl mid">${r.name}</td><td class="n">${r.b ? classIcon(r.b, 20) : '–'}</td></tr>`).join('')}</table>` : '';
+    `<tr><td class="n">${r.w ? classIcon(r.w, 20) : '–'}</td><td class="pct">${r.wAcc == null ? '' : r.wAcc.toFixed(0) + ' %'}</td><td class="lbl mid">${r.name}</td><td class="pct">${r.bAcc == null ? '' : r.bAcc.toFixed(0) + ' %'}</td><td class="n">${r.b ? classIcon(r.b, 20) : '–'}</td></tr>`).join('')}</table>` : '';
+  renderTimeBox();
   $('moments').innerHTML = sum.moments.length ? `<h3>Schlüsselmomente</h3><div class="moment-list">${sum.moments.map((m) =>
     `<button type="button" class="moment" data-ply="${m.ply}">${classIcon(m.cls, 18)}<b>${esc(m.label)}</b><span>${CLASSES[m.cls].label}</span></button>`).join('')}</div>` : '';
   $('tips').innerHTML = sum.tips.map((t) =>
@@ -816,6 +926,24 @@ function renderOverview() {
     + (game.date ? `${op ? ' · ' : ''}${esc(game.date.split('-').reverse().join('.'))}` : '')
     + (game.timeClass ? ` · ${timeClassName(game.timeClass)}` : '');
   renderGraphs();
+}
+
+const fmtSec = (sec) => (sec >= 60 ? `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')} min` : `${sec < 10 ? sec.toFixed(1) : Math.round(sec)} s`);
+
+/** Zeitmanagement in der Übersicht: Durchschnitt, längstes Nachdenken, Zeitnot, vorschnelle Fehler. */
+function renderTimeBox() {
+  const { game, review } = S;
+  const items = [];
+  for (const c of S.you ? [S.you] : ['w', 'b']) {
+    const r = timeReport(game, review, c);
+    if (!r) continue;
+    const who = S.you ? 'Du' : esc(c === 'w' ? game.white.name : game.black.name);
+    const num = (k) => Math.floor(k / 2) + 1;
+    items.push(`${who}: im Schnitt ${fmtSec(r.avg)} pro Zug, am längsten bei Zug ${num(r.longest.k)} (${fmtSec(r.longest.sec)}).`);
+    if (r.trouble) items.push(`${who}: Zeitnot ab Zug ${num(r.troubleFrom)} – ${r.trouble} Züge mit weniger als ${fmtSec(r.limit)} auf der Uhr${r.troubleErrors ? `, dabei ${r.troubleErrors} grobe Fehler` : ''}.`);
+    if (r.fastErrors) items.push(`${who}: ${r.fastErrors} grobe Fehler blitzschnell gezogen, obwohl genug Zeit da war.`);
+  }
+  $('timebox').innerHTML = items.length ? `<h3>Zeiteinteilung</h3><ul class="time-list">${items.map((i) => `<li>${i}</li>`).join('')}</ul>` : '';
 }
 
 // ---------------------------------------------------------------------------
@@ -932,6 +1060,7 @@ function flip() {
 function legalTargets(square) {
   if (S.mode === 'lesson') return lessonTargets(square);
   if (S.mode === 'puzzle') return puzzleTargets(square);
+  if (S.mode === 'play') return playTargets(square);
   if (S.view !== 'moves') return [];
   if (S.retry && S.retry.state !== 'waiting') return [];
   const chess = new Chess(currentFen());
@@ -954,6 +1083,10 @@ function onUserMove({ from, to, promotion }) {
   }
   if (S.mode === 'puzzle') {
     puzzleMove({ from, to, promotion });
+    return;
+  }
+  if (S.mode === 'play') {
+    playMove({ from, to, promotion });
     return;
   }
   const fen = currentFen();

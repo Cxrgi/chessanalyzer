@@ -38,6 +38,7 @@
       <button type="button" class="tile big" data-go="analyse"><span class="tile-ico" data-ico="search"></span><b>Partie analysieren</b><small>Link einer chess.com-Partie einfügen – der Coach erklärt jeden Zug.</small></button>
       <button type="button" class="tile big" data-go="lektionen"><span class="tile-ico" data-ico="book"></span><b>Lektionen</b><small>Schach lernen – von den Regeln bis zum Endspiel.</small><span class="tile-prog" id="tile-prog"></span></button>
       <button type="button" class="tile big" data-go="aufgaben"><span class="tile-ico" data-ico="bulb"></span><b>Taktikaufgaben</b><small>Tausende Aufgaben, passend zu deiner Spielstärke.</small><span class="tile-prog" id="tile-puzzles"></span></button>
+      <button type="button" class="tile" data-go="spielen"><span class="tile-ico" data-ico="user"></span><b>Gegen den Computer</b><small>Acht Stärkestufen, Zug zurücknehmen, Tipp – danach direkt analysieren.</small></button>
       <button type="button" class="tile" data-go="brett"><span class="tile-ico" data-ico="grid"></span><b>Analysebrett</b><small>Frei für beide Seiten ziehen, die Engine zeigt den besten Zug.</small></button>
       <button type="button" class="tile" data-go="editor"><span class="tile-ico" data-ico="edit"></span><b>Stellung aufbauen</b><small>Eigene Position festlegen und von dort aus spielen.</small></button>
       <button type="button" class="tile" data-go="recent"><span class="tile-ico" data-ico="user"></span><b>Meine letzten Partien</b><small>Partien direkt aus deinem chess.com-Konto auswählen.</small></button>
@@ -141,13 +142,15 @@
       <!-- Übersicht -->
       <section class="pane" id="pane-overview" hidden>
         <div class="acc-row" id="acc-row"></div>
-        <table class="counts" id="counts"></table>
-        <div class="ov-block" id="phases"></div>
+        <button class="btn primary big" id="btn-start">Analyse starten</button>
+        <p class="opening" id="opening-line"></p>
+        <div class="graph-wrap"><svg id="graph-overview" class="graph" viewBox="0 0 400 90" preserveAspectRatio="none" role="img" aria-label="Bewertungsverlauf der Partie"></svg></div>
         <div class="ov-block" id="moments"></div>
         <div class="ov-block" id="tips"></div>
-        <div class="graph-wrap"><svg id="graph-overview" class="graph" viewBox="0 0 400 90" preserveAspectRatio="none"></svg></div>
-        <p class="opening" id="opening-line"></p>
-        <button class="btn primary big" id="btn-start">Analyse starten</button>
+        <div class="ov-block" id="timebox"></div>
+        <table class="counts" id="counts"></table>
+        <div class="ov-block" id="phases"></div>
+        <div class="ov-actions" id="ov-actions"></div>
       </section>
 
       <!-- Zug für Zug -->
@@ -175,6 +178,28 @@
           <button type="button" class="btn soft" id="ls-next">Weiter</button>
         </div>
         <button type="button" class="link ls-all" id="ls-all">Alle Lektionen</button>
+      </section>
+
+      <!-- Gegen den Computer -->
+      <section class="pane" id="pane-play" hidden>
+        <div id="play-setup" class="play-setup">
+          <span class="ed-label">Stärke des Computers</span>
+          <div class="levels" id="play-levels"></div>
+          <span class="ed-label">Deine Farbe</span>
+          <div class="seg" id="play-color"></div>
+          <button type="button" class="btn primary big" id="play-start">Partie starten</button>
+          <span class="ed-label">Endspieltrainer</span>
+          <div class="endgame-list" id="play-endgames"></div>
+        </div>
+        <div id="play-game" class="play-game" hidden>
+          <div class="moves" id="play-moves"></div>
+          <div class="play-actions">
+            <button type="button" class="btn soft small" id="play-undo">Zug zurück</button>
+            <button type="button" class="btn soft small" id="play-hint">Tipp</button>
+            <button type="button" class="btn soft small" id="play-resign">Aufgeben</button>
+            <button type="button" class="btn ghost small" id="play-new">Neue Partie</button>
+          </div>
+        </div>
       </section>
 
       <!-- Taktikaufgaben -->
@@ -245,6 +270,7 @@
           <button type="button" class="btn soft small" id="pw-save">Speichern</button>
         </div>
         <p class="hint" id="pw-msg"></p>
+        <button type="button" class="btn soft small" id="pw-logout-all">Auf allen anderen Geräten abmelden</button>
       </div>
     </form>
   </dialog>

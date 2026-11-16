@@ -45,7 +45,7 @@ class UciWorker {
     } finally {
       clearInterval(retry);
     }
-    this.send('setoption name Hash value 32');
+    this.send(`setoption name Hash value ${ENGINE_PROFILE.hash}`);
     this.send(`setoption name MultiPV value ${multiPv}`);
     this.send('isready');
     await this.waitFor((l) => l === 'readyok');
@@ -112,45 +112,83 @@ async function search(uci, fen, { depth, movetime, onUpdate }) {
   return toLines(infos.filter((i) => i && i.depth >= top - 1), fen);
 }
 
+const MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.deviceMemory || 8) <= 4;
+/** Zahl der parallelen Engines und Hash-Größe – auf Handys und schwachen Geräten sparsamer. */
+export const ENGINE_PROFILE = {
+  workers: Math.max(1, Math.min(MOBILE ? 2 : 4, (navigator.hardwareConcurrency || 2) - 1)),
+  hash: MOBILE ? 16 : 32,
+};
+
+// Die Analyse-Worker bleiben zwischen den Partien am Leben (das Laden der Engine kostet sonst jedes Mal Zeit).
+const workers = [];
+let lastRun = Promise.resolve();
+
+async function acquire(n) {
+  while (workers.length < n) {
+    const uci = new UciWorker();
+    uci.ready = uci.init(2).catch((e) => {
+      workers.splice(workers.indexOf(uci), 1);
+      uci.terminate();
+      throw e;
+    });
+    workers.push(uci);
+  }
+  const list = workers.slice(0, n);
+  await Promise.all(list.map((w) => w.ready));
+  return list;
+}
+
+/** Lädt die Engine schon im Voraus, z. B. während der Link eingefügt wird. */
+export function warmEngine() {
+  acquire(ENGINE_PROFILE.workers).catch(() => {});
+}
+
 /** Analysiert alle Stellungen einer Partie parallel in mehreren Workern. */
 export class AnalysisPool {
   constructor() {
-    const cores = navigator.hardwareConcurrency || 2;
-    this.size = Math.max(1, Math.min(4, cores - 1));
-    this.workers = [];
     this.cancelled = false;
+    this.active = [];
   }
 
-  async analyze(fens, { depth = 14, onProgress } = {}) {
+  /**
+   * @param fens   Stellungen der Partie
+   * @param known  bereits bekannte Ergebnisse (Index → Ergebnis), z. B. Buchzüge oder Cache-Treffer
+   */
+  async analyze(fens, { depth = 14, onProgress, known = {} } = {}) {
     const results = new Array(fens.length);
     const queue = [];
     fens.forEach((fen, i) => {
       const t = terminalEval(fen);
       if (t) results[i] = t;
+      else if (known[i]) results[i] = known[i];
       else queue.push(i);
     });
     const total = queue.length;
     let done = 0;
     const movetime = depth <= 12 ? 2500 : depth <= 16 ? 6000 : 15000;
 
-    const run = async () => {
-      const uci = new UciWorker();
-      this.workers.push(uci);
-      await uci.init(2);
-      while (queue.length && !this.cancelled) {
-        const i = queue.shift();
-        const lines = await search(uci, fens[i], { depth, movetime });
-        if (this.cancelled) return;
-        results[i] = { lines, eval: lines[0] ? lines[0].eval : { type: 'cp', value: 0 } };
-        done++;
-        onProgress && onProgress(done, total, i);
-      }
-    };
-
+    // erst starten, wenn eine vorher abgebrochene Analyse ihre Worker freigegeben hat
+    const previous = lastRun;
+    let release;
+    lastRun = new Promise((r) => { release = r; });
     try {
-      await Promise.all(Array.from({ length: Math.min(this.size, Math.max(1, total)) }, run));
+      await previous;
+      if (this.cancelled) throw new Error('abgebrochen');
+      this.active = await acquire(Math.min(ENGINE_PROFILE.workers, Math.max(1, total)));
+      const run = async (uci) => {
+        while (queue.length && !this.cancelled) {
+          const i = queue.shift();
+          const lines = await search(uci, fens[i], { depth, movetime });
+          if (this.cancelled) return;
+          results[i] = { lines, eval: lines[0] ? lines[0].eval : { type: 'cp', value: 0 }, fresh: true };
+          done++;
+          onProgress && onProgress(done, total, i);
+        }
+      };
+      await Promise.all(this.active.map(run));
     } finally {
-      this.dispose();
+      this.active = [];
+      release();
     }
     if (this.cancelled) throw new Error('abgebrochen');
     return results;
@@ -158,12 +196,7 @@ export class AnalysisPool {
 
   cancel() {
     this.cancelled = true;
-    this.dispose();
-  }
-
-  dispose() {
-    this.workers.forEach((w) => w.terminate());
-    this.workers = [];
+    this.active.forEach((w) => w.send('stop'));
   }
 }
 
@@ -243,5 +276,33 @@ export class LiveEngine {
     if (this.pending && this.pending.onCancel) this.pending.onCancel();
     this.pending = null;
     if (this.busy && this.uci) this.uci.send('stop');
+  }
+}
+
+/** Engine als Spielgegner: liefert für eine Stellung die besten Linien bei begrenzter Tiefe und Spielstärke. */
+export class EnginePlayer {
+  constructor() {
+    this.uci = null;
+    this.ready = null;
+  }
+
+  ensure() {
+    if (!this.ready) {
+      this.uci = new UciWorker();
+      this.ready = this.uci.init(4);
+    }
+    return this.ready;
+  }
+
+  /** @returns Linien (beste zuerst) aus Sicht von Weiß */
+  async lines(fen, { depth = 8, skill = 20, multipv = 4 } = {}) {
+    await this.ensure();
+    this.uci.send(`setoption name Skill Level value ${skill}`);
+    this.uci.send(`setoption name MultiPV value ${multipv}`);
+    return search(this.uci, fen, { depth, movetime: 2500 });
+  }
+
+  stop() {
+    if (this.uci) this.uci.send('stop');
   }
 }

@@ -132,6 +132,11 @@ a { color: var(--accent); }
 .game-names small { color: var(--muted); }
 .game-meta { color: var(--muted); font-size: .84rem; white-space: nowrap; }
 .game-empty { padding: 16px; color: var(--muted); }
+.hist-row { display: flex; align-items: center; padding-right: 8px; }
+.hist-row .game-item { flex: 1; min-width: 0; grid-template-columns: 26px 1fr; }
+.game-sub { display: block; color: var(--muted); font-size: .8rem; overflow: hidden; text-overflow: ellipsis; }
+.hist-fav.on { color: var(--warn); }
+.game-item.more { display: block; text-align: center; color: var(--accent); }
 
 .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 40px; }
 .features article { background: rgba(28, 34, 44, .6); border: 1px solid var(--line); border-radius: 16px; padding: 18px; }
@@ -200,6 +205,22 @@ a { color: var(--accent); }
 .pw-form input { background: var(--bg-2); color: var(--text); border: 1px solid var(--line); border-radius: 9px; padding: 9px 11px; font: inherit; }
 .pw-form input:focus { outline: none; border-color: var(--accent); }
 .pw-form .btn { align-self: flex-start; }
+
+/* ---- Gegen den Computer -------------------------------------------------- */
+#pane-play { overflow: auto; }
+.play-setup, .play-game { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.play-game { flex: 1; }
+.levels { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.level { background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 4px; display: flex; flex-direction: column; align-items: center; line-height: 1.2; }
+.level b { font-size: 1.15rem; }
+.level span { font-size: .72rem; color: var(--muted); }
+.level small { font-size: .68rem; color: #6f7c90; }
+.level.on { border-color: var(--accent); background: rgba(62, 207, 142, .14); }
+.level:hover { border-color: #3c4759; }
+.endgame-list { display: flex; flex-direction: column; gap: 6px; }
+.endgame-list .lesson-card { padding: 8px 12px; }
+.play-actions { display: flex; flex-wrap: wrap; gap: 6px; flex: none; }
+.play-game .mv { cursor: default; }
 
 /* ---- Taktikaufgaben ----------------------------------------------------- */
 #pane-puzzle { gap: 12px; flex: 0 0 auto; }
@@ -347,7 +368,12 @@ a { color: var(--accent); }
 /* Übersicht */
 #pane-overview { overflow: auto; scrollbar-width: thin; }
 #pane-overview > * { flex: none; }
-#pane-overview .btn.big { position: sticky; bottom: 0; margin-top: auto; }
+.ov-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.ov-actions:empty { display: none; }
+.time-list { margin: 0; padding: 0; list-style: none; font-size: .92rem; display: flex; flex-direction: column; gap: 4px; color: var(--text); }
+.time-list li { display: flex; gap: 8px; }
+.time-list li::before { content: "⏱"; opacity: .7; }
+.counts td.pct { font-size: .8rem; color: var(--muted); width: 54px; text-align: center; font-variant-numeric: tabular-nums; }
 .acc-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .acc { border-radius: 12px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; min-width: 0; }
 .acc.w { background: #f4f6f8; color: #1a2029; }

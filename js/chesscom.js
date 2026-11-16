@@ -87,7 +87,10 @@ function buildGame(meta, startFen, moveInputs, clocks) {
     fens.push(chess.fen());
   });
   if (!moves.length) throw new LoadError('empty', 'Diese Partie enthält keine Züge.');
+  // Remis durch dreifache Stellungswiederholung oder die 50-Züge-Regel (für die Engine sieht das nicht nach Remis aus)
+  const drawn = chess.isThreefoldRepetition() ? 'repetition' : chess.isDrawByFiftyMoves() ? 'fifty' : null;
   return {
+    drawn,
     id: meta.id || 'pgn-' + hash(fens[fens.length - 1] + moves.length + (meta.white?.name || '')),
     url: meta.url || null,
     white: { name: 'Weiß', rating: null, avatar: null, ...meta.white },
@@ -274,20 +277,6 @@ async function viaOwnProxy(type, id) {
   return data;
 }
 
-/** Öffentliche CORS-Proxys als Notlösung für rein statisches Hosting. */
-async function viaPublicProxy(type, id) {
-  const target = callbackUrl(type, id);
-  const urls = [
-    'https://api.allorigins.win/raw?url=' + encodeURIComponent(target),
-    'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(target),
-  ];
-  return Promise.any(urls.map(async (u) => {
-    const data = await fetchJson(u, { timeout: 8000 });
-    if (!data || !data.game) throw new Error('ungültige Antwort');
-    return data;
-  }));
-}
-
 async function fetchArchiveList(username) {
   try {
     const data = await fetchJson(`${PUB}/player/${encodeURIComponent(username.toLowerCase())}/games/archives`);
@@ -303,17 +292,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** Sucht eine Partie anhand ihrer ID in den Monatsarchiven eines Spielers (neueste zuerst). */
 async function findInArchives(username, id, { maxMonths = 36, onStatus } = {}) {
   const archives = (await fetchArchiveList(username)).slice().reverse().slice(0, maxMonths);
-  for (const url of archives) {
-    const label = url.split('/').slice(-2).join('/');
-    onStatus && onStatus(`Durchsuche das Archiv ${label} …`);
-    let data;
-    try {
-      data = await fetchJson(url, { timeout: 20000 });
-    } catch (e) {
-      continue;
+  // jeweils vier Monate gleichzeitig laden – deutlich schneller als einer nach dem anderen
+  for (let i = 0; i < archives.length; i += 4) {
+    const batch = archives.slice(i, i + 4);
+    const label = (u) => u.split('/').slice(-2).join('/');
+    onStatus && onStatus(`Durchsuche das Archiv ${label(batch[batch.length - 1])} bis ${label(batch[0])} …`);
+    const results = await Promise.all(batch.map((url) => fetchJson(url, { timeout: 20000 }).catch(() => null)));
+    for (const data of results) {
+      const hit = data && (data.games || []).find((g) => g.url && g.url.split('/').pop() === String(id));
+      if (hit) return hit;
     }
-    const hit = (data.games || []).find((g) => g.url && g.url.split('/').pop() === String(id));
-    if (hit) return hit;
     await sleep(150);
   }
   return null;
@@ -321,7 +309,7 @@ async function findInArchives(username, id, { maxMonths = 36, onStatus } = {}) {
 
 /**
  * Lädt eine Partie über ihren Link.
- * Reihenfolge: eigener Proxy → Archiv des gespeicherten Benutzers → öffentliche Proxys.
+ * Reihenfolge: eigener Proxy → Archiv des gespeicherten Benutzers.
  * Scheitert alles, wird LoadError('needuser') geworfen – dann fragt die Oberfläche nach dem Benutzernamen.
  */
 export async function loadByLink(link, { username, onStatus, deep = false } = {}) {
@@ -347,14 +335,6 @@ export async function loadByLink(link, { username, onStatus, deep = false } = {}
     if (hit) return gameFromArchive(hit);
     if (deep) {
       throw new LoadError('notfound', `In den Partien von „${username}“ wurde diese Partie nicht gefunden. Stimmt der Benutzername?`);
-    }
-  }
-  onStatus && onStatus('Lade die Partie von chess.com …');
-  for (const type of types) {
-    try {
-      return gameFromCallback(await viaPublicProxy(type, link.id), type);
-    } catch (e) {
-      if (e instanceof LoadError) throw e;
     }
   }
   throw new LoadError('needuser', 'Für diesen Link wird dein chess.com-Benutzername gebraucht.');

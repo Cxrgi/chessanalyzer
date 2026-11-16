@@ -1,6 +1,6 @@
 // Kleiner lokaler Server: liefert die Seite aus, schützt sie mit einem Passwort
 // und holt Partien von chess.com (/api/game).
-// Start: npm start  →  http://localhost:8080      (ohne Passwort: NO_PASSWORD=1 npm start)
+// Start: npm start  →  http://localhost:8080      (ohne Passwort: REQUIRE_LOGIN=false npm start)
 import http from 'node:http';
 import { readFile, writeFile, mkdir, rm, stat } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
@@ -13,13 +13,13 @@ const PORT = Number(process.env.PORT) || 8080;
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml',
-  '.wasm': 'application/wasm', '.png': 'image/png', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8',
+  '.wasm': 'application/wasm', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8',
 };
-const PUBLIC = ['index.html', 'css', 'js', 'vendor', 'assets', 'data'];
+const PUBLIC = ['index.html', 'css', 'js', 'vendor', 'assets', 'data', 'sw.js', 'manifest.webmanifest'];
 
 // Passwortschutz: Der Hash liegt in .data/auth.json (nicht im Repository).
-const GATED = !process.env.NO_PASSWORD;
-const UNGATED = /^\/(vendor|assets|css)\//;
+const GATED = !process.env.NO_PASSWORD && process.env.REQUIRE_LOGIN !== 'false';
+const UNGATED = /^\/(vendor|assets|css|data)\/|^\/manifest\.webmanifest$/;
 const AUTH_FILE = join(ROOT, '.data', 'auth.json');
 const store = {
   get: async () => {
@@ -50,7 +50,7 @@ async function gate(req, res, url) {
     body = Buffer.concat(chunks);
   }
   const request = new Request(`http://${req.headers.host || 'localhost'}${req.url}`, { method: req.method, headers, body });
-  const out = await handleGate(request, { store, ip: req.socket.remoteAddress || 'local' });
+  const out = await handleGate(request, { store, ip: req.socket.remoteAddress || 'local', setupToken: process.env.SETUP_TOKEN || '' });
   if (!out) return false;
   const h = {};
   out.headers.forEach((v, k) => { if (k !== 'set-cookie') h[k] = v; });

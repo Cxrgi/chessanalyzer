@@ -8,7 +8,7 @@ export default async (req) => {
     status,
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
-      'Cache-Control': body.game && body.game.isFinished ? 'public, max-age=86400' : 'no-store',
+      'Cache-Control': body.game && body.game.isFinished ? 'private, max-age=86400' : 'no-store',
     },
   });
 };

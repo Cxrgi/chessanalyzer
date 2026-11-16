@@ -238,6 +238,9 @@ function materialSwing(fen, moves, max = 8) {
   return { delta: materialInfo(moves[end].fen).diff - base, end };
 }
 
+/** Diagnose eines schlechten Zuges: Widerlegung und verpasste Idee (jeweils { text, tag } oder null). */
+export const diagnoseMove = (ctx, k) => diagnose(ctx, k);
+
 function diagnose(ctx, k) {
   const cache = ctx.review.diag || (ctx.review.diag = new Map());
   if (!cache.has(k)) cache.set(k, { refute: refutation(ctx, k), missed: missedIdea(ctx, k) });
@@ -499,7 +502,7 @@ function nonPawnMaterial(fen) {
 }
 
 /** Teilt die Partie in Eröffnung, Mittelspiel und Endspiel und bewertet jede Phase je Seite. */
-function phases(ctx) {
+export function phases(ctx) {
   const { game, review } = ctx;
   const n = game.moves.length;
   const openingEnd = Math.min(n, Math.max(16, Math.min(24, (review.opening ? review.opening.ply : 0) + 6)));
@@ -517,6 +520,7 @@ function phases(ctx) {
       const accs = [];
       for (let k = a; k < b; k++) if (game.moves[k].color === c) accs.push(review.moves[k].accuracy);
       const avg = accs.length ? accs.reduce((x, y) => x + y, 0) / accs.length : null;
+      row[c + 'Acc'] = avg;
       row[c] = avg == null ? null
         : avg >= 93 ? 'best' : avg >= 85 ? 'excellent' : avg >= 75 ? 'good' : avg >= 62 ? 'inaccuracy' : avg >= 48 ? 'mistake' : 'blunder';
     }
