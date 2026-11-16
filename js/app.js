@@ -5,6 +5,7 @@ import { initPuzzles, openPuzzles, puzzleTargets, puzzleMove, puzzleKey, puzzleS
 import { initTraining, openTraining, trainingTargets, trainingMove, trainingKey, trainingSummary, leaveTraining } from './training.js';
 import { initProfile, renderProfile, dayStreak, TAGS } from './profile.js';
 import { initPlay, openPlay, playTargets, playMove, leavePlay } from './play.js';
+import { initTrainers, openTrainers, trainerTargets, trainerMove, trainerSummary, leaveTrainers } from './trainers.js';
 import { initLessons, renderLessonList, openLesson, lessonTargets, lessonMove, lessonKey, lessonProgress } from './lessons.js';
 import { Board } from './board.js';
 import { AnalysisPool, LiveEngine, EnginePlayer, warmEngine } from './engine.js';
@@ -119,6 +120,7 @@ function init() {
     onResult: (r) => bump(r.scenario ? 'endgames' : 'played', r),
   });
   initTraining({ board, $, setCoach, playSound, enterTrainingView: () => soloPane('pane-training', 'training', 'Fehler-Training'), san: sanDe, evaluate: (fen) => live.evaluate(fen, 13), onCard: () => bump('cards') });
+  initTrainers({ board, $, setCoach, store, esc, playSound, san: sanDe, enterTrainerView: (title) => soloPane('pane-trainer', 'trainer', title), openBoard: (fen, ucis) => openBoard(fen, ucis), onDone: (kind) => bump(kind === 'coords' ? 'coords' : 'openings') });
   initProfile({
     $, esc, store, lessonProgress, username: () => S.username, batchAnalyze, download, themeName,
     openTheme: (theme) => { store.set('puzzles', { ...store.get('puzzles', {}), theme }); location.hash = '#aufgaben'; },
@@ -310,6 +312,7 @@ function bindEvents() {
       setTimeout(() => (S.username ? showRecentGames(S.username) : $('user-input').focus()), 50);
     }
   });
+  $('lessons-search').addEventListener('input', (e) => renderLessonList(e.target.value));
   $('hub-continue').onclick = () => {
     const { next } = lessonProgress();
     if (next) location.hash = '#lektion/' + next.id;
@@ -725,6 +728,12 @@ async function routeFromHash() {
     window.scrollTo(0, 0);
     return;
   }
+  if (id === 'trainer' || id.startsWith('trainer/')) {
+    const [, tab, op] = id.split('/');
+    leaveModes();
+    openTrainers(tab === 'eroeffnungen' ? 'openings' : 'coords', op);
+    return;
+  }
   if (id === 'spielen') {
     if (S.mode !== 'play') {
       leaveModes();
@@ -792,11 +801,12 @@ function leaveModes() {
   board.setInteractive(false);
   document.querySelector('.panel').classList.remove('is-editor');
   $('review').classList.remove('lesson-mode');
-  for (const id of ['pane-editor', 'pane-lesson', 'pane-puzzle', 'pane-play', 'pane-training']) $(id).hidden = true;
+  for (const id of ['pane-editor', 'pane-lesson', 'pane-puzzle', 'pane-play', 'pane-training', 'pane-trainer']) $(id).hidden = true;
   $('coach').hidden = false;
   leavePuzzles();
   leavePlay();
   leaveTraining();
+  leaveTrainers();
   S.game = S.review = S.variation = S.retry = null;
 }
 
@@ -823,7 +833,10 @@ function renderHub() {
   });
   const act = store.get('activity', {});
   const today = act[new Date().toISOString().slice(0, 10)] || {};
-  $('tile-profile').innerHTML = `<span>${dayStreak(act)} Tage in Folge · heute ${today.puzzles || 0} Aufgaben</span>`;
+  const streak = dayStreak(act);
+  $('tile-profile').innerHTML = `<span>${streak === 1 ? '1 Tag' : streak + ' Tage'} in Folge · heute ${today.puzzles || 0} Aufgaben</span>`;
+  const tn = trainerSummary();
+  $('tile-trainer').innerHTML = `<span>${tn.learned} von ${tn.total} Eröffnungen${tn.coords ? ` · Rekord ${tn.coords} Felder` : ''}</span>`;
   const cont = $('hub-continue');
   cont.hidden = !next || done === 0;
   if (next) cont.innerHTML = `<div><span>Weiter lernen</span><b>${esc(next.title)}</b></div>${uiIcon('arrow', 22)}`;
@@ -846,6 +859,7 @@ function showLessons() {
   showMain('lessons');
   const { done, total } = lessonProgress();
   $('lessons-lead').textContent = done ? `${done} von ${total} Lektionen geschafft. Mach da weiter, wo du aufgehört hast.` : `${total} kurze Lektionen mit Aufgaben direkt auf dem Brett. Fang einfach vorn an.`;
+  $('lessons-search').value = '';
   renderLessonList();
   document.title = 'Lektionen · Chess Analyzer';
   window.scrollTo(0, 0);
@@ -870,7 +884,7 @@ function soloPane(id, mode, title) {
   S.view = mode;
   showMain('review');
   $('review').classList.add('lesson-mode');
-  for (const p of ['pane-progress', 'pane-overview', 'pane-moves', 'pane-editor', 'pane-lesson', 'pane-puzzle', 'pane-play', 'pane-training']) $(p).hidden = p !== id;
+  for (const p of ['pane-progress', 'pane-overview', 'pane-moves', 'pane-editor', 'pane-lesson', 'pane-puzzle', 'pane-play', 'pane-training', 'pane-trainer']) $(p).hidden = p !== id;
   $('controls').hidden = true;
   document.title = `${title} · Chess Analyzer`;
   window.scrollTo(0, 0);
@@ -1501,6 +1515,7 @@ function legalTargets(square) {
   if (S.mode === 'puzzle') return puzzleTargets(square);
   if (S.mode === 'play') return playTargets(square);
   if (S.mode === 'training') return trainingTargets(square);
+  if (S.mode === 'trainer') return trainerTargets(square);
   if (S.view !== 'moves') return [];
   if (S.retry && S.retry.state !== 'waiting') return [];
   const chess = new Chess(currentFen());
@@ -1531,6 +1546,10 @@ function onUserMove({ from, to, promotion }) {
   }
   if (S.mode === 'training') {
     trainingMove({ from, to, promotion });
+    return;
+  }
+  if (S.mode === 'trainer') {
+    trainerMove({ from, to, promotion });
     return;
   }
   const fen = currentFen();

@@ -38,7 +38,7 @@ function knock(t, { freq = 190, gain = 0.5, len = 0.07 }) {
   osc.stop(t + len + 0.02);
 }
 
-/** kind: 'move' | 'capture' | 'check' | 'castle' | 'end' */
+/** kind: 'move' | 'capture' | 'check' | 'castle' | 'end' | 'error' */
 export function playSound(kind) {
   if (!enabled || volume <= 0) return;
   const ac = audio();
@@ -53,6 +53,8 @@ export function playSound(kind) {
   } else if (kind === 'castle') {
     knock(t, { freq: 190, gain: 0.45 });
     knock(t + 0.09, { freq: 170, gain: 0.45 });
+  } else if (kind === 'error') {
+    knock(t, { freq: 110, gain: 0.4, len: 0.13 });
   } else if (kind === 'end') {
     knock(t, { freq: 330, gain: 0.3, len: 0.16 });
     knock(t + 0.14, { freq: 440, gain: 0.3, len: 0.22 });

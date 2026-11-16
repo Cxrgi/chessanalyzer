@@ -41,6 +41,7 @@
       <button type="button" class="tile" data-go="training"><span class="tile-ico" data-ico="retry"></span><b>Fehler-Training</b><small>Deine eigenen Patzer als Aufgaben – bis sie sitzen.</small><span class="tile-prog" id="tile-training"></span></button>
       <button type="button" class="tile" data-go="profil"><span class="tile-ico" data-ico="chart"></span><b>Mein Profil</b><small>Fortschritt, Schwächen und Statistik.</small><span class="tile-prog" id="tile-profile"></span></button>
       <button type="button" class="tile" data-go="spielen"><span class="tile-ico" data-ico="user"></span><b>Gegen den Computer</b><small>Acht Stärkestufen, Zug zurücknehmen, Tipp – danach direkt analysieren.</small></button>
+      <button type="button" class="tile" data-go="trainer"><span class="tile-ico" data-ico="star"></span><b>Trainer</b><small>Eröffnungen einüben und Felder blitzschnell finden.</small><span class="tile-prog" id="tile-trainer"></span></button>
       <button type="button" class="tile" data-go="brett"><span class="tile-ico" data-ico="grid"></span><b>Analysebrett</b><small>Frei für beide Seiten ziehen, die Engine zeigt den besten Zug.</small></button>
       <button type="button" class="tile" data-go="editor"><span class="tile-ico" data-ico="edit"></span><b>Stellung aufbauen</b><small>Eigene Position festlegen und von dort aus spielen.</small></button>
       <button type="button" class="tile" data-go="recent"><span class="tile-ico" data-ico="user"></span><b>Meine letzten Partien</b><small>Partien direkt aus deinem chess.com-Konto auswählen.</small></button>
@@ -109,6 +110,7 @@
       <p class="eyebrow">Lektionen</p>
       <h1>Schach lernen, Schritt für Schritt.</h1>
       <p class="lead" id="lessons-lead"></p>
+      <input type="search" id="lessons-search" class="lessons-search" placeholder="Lektion suchen, z. B. Gabel, Rochade, Endspiel …" aria-label="Lektion suchen" autocomplete="off">
     </header>
     <div id="lessons-list"></div>
   </main>
@@ -236,6 +238,12 @@
             <button type="button" class="btn ghost small" id="play-new">Neue Partie</button>
           </div>
         </div>
+      </section>
+
+      <!-- Trainer: Koordinaten und Eröffnungen -->
+      <section class="pane" id="pane-trainer" hidden>
+        <div class="chips flat" id="tn-tabs"></div>
+        <div class="tn-body" id="tn-body"></div>
       </section>
 
       <!-- Taktikaufgaben -->

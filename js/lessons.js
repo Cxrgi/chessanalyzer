@@ -40,25 +40,31 @@ export function initLessons(deps) {
 // Übersicht
 // ---------------------------------------------------------------------------
 
-export function renderLessonList() {
+export function renderLessonList(filter = '') {
   const done = doneMap();
+  const q = filter.trim().toLowerCase();
   let n = 0;
-  d.$('lessons-list').innerHTML = COURSES.map((c) => {
+  let shown = 0;
+  const html = COURSES.map((c) => {
     const count = c.lessons.filter((l) => done[l.id]).length;
-    return `<section class="course">
+    const hits = new Set(c.lessons.filter((l) => !q || `${l.title} ${l.desc} ${c.title}`.toLowerCase().includes(q)).map((l) => l.id));
+    shown += hits.size;
+    const badge = count === c.lessons.length ? '<span class="course-badge">✓ Kurs geschafft</span>' : '';
+    return `<section class="course" ${hits.size ? '' : 'hidden'}>
       <header class="course-head">
-        <div><h2>${d.esc(c.title)}</h2><p>${d.esc(c.desc)}</p></div>
+        <div><h2>${d.esc(c.title)}${badge}</h2><p>${d.esc(c.desc)}</p></div>
         <div class="course-prog"><span>${count} / ${c.lessons.length}</span><div class="bar"><i style="width:${(count / c.lessons.length) * 100}%"></i></div></div>
       </header>
       <div class="lesson-grid">${c.lessons.map((l) => {
         n++;
-        return `<button type="button" class="lesson-card ${done[l.id] ? 'done' : ''}" data-lesson="${l.id}">
+        return `<button type="button" class="lesson-card ${done[l.id] ? 'done' : ''}" data-lesson="${l.id}" ${hits.has(l.id) ? '' : 'hidden'}>
           <span class="lesson-num">${done[l.id] ? d.uiIcon('check', 18) : n}</span>
           <span class="lesson-txt"><b>${d.esc(l.title)}</b><small>${d.esc(l.desc)}</small></span>
         </button>`;
       }).join('')}</div>
     </section>`;
   }).join('');
+  d.$('lessons-list').innerHTML = html + (shown ? '' : '<p class="game-empty">Keine Lektion gefunden. Versuch es mit einem anderen Wort, zum Beispiel „Gabel“ oder „Endspiel“.</p>');
 }
 
 // ---------------------------------------------------------------------------
