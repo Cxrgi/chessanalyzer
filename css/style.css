@@ -291,6 +291,17 @@ a { color: var(--accent); }
 .pz-select { background: var(--bg-2); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 10px 11px; font: inherit; margin-top: -6px; }
 .pz-select:focus { outline: none; border-color: var(--accent); }
 
+.chips.flat { padding: 0; border: 0; }
+.pz-rush { display: flex; justify-content: space-between; align-items: center; background: var(--bg-2); border: 1px solid var(--warn); border-radius: 12px; padding: 8px 14px; font-variant-numeric: tabular-nums; }
+.pz-rush b { font-size: 1.5rem; }
+.pz-rush span { color: #ff7769; font-size: 1.2rem; letter-spacing: 2px; }
+.pz-extra { display: flex; flex-direction: column; gap: 6px; color: var(--accent); }
+.pz-extra .spark { height: 46px; }
+.pz-weak { display: grid; grid-template-columns: 1fr 90px 44px; gap: 8px; align-items: center; background: none; border: 0; padding: 2px 0; text-align: left; color: var(--text); font-size: .88rem; }
+.pz-weak:hover span { color: var(--accent); }
+.pz-weak b { text-align: right; font-variant-numeric: tabular-nums; }
+#pane-puzzle { overflow: auto; flex: 1; }
+
 /* ---- Analyse-Layout ----------------------------------------------------- */
 .review {
   --bar: 26px;
