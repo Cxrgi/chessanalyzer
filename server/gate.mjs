@@ -8,6 +8,7 @@
 import { loginPage } from './login-page.mjs';
 import { adminPage } from './admin-page.mjs';
 import { handleSync } from './sync.mjs';
+import { impressumPage, privacyPage } from './legal-pages.mjs';
 
 const USER_COOKIE = 'ca_user';
 const ADMIN_COOKIE = 'ca_admin';
@@ -350,7 +351,7 @@ async function adminApi(request, url, env) {
       if (u) users.push({ name: u.name, created: u.created, seen: u.seen, site: u.site, chesscom: u.chesscom, lichess: u.lichess, disabled: !!u.disabled });
     }
     users.sort((a, b) => String(b.seen).localeCompare(String(a.seen)) || a.name.localeCompare(b.name));
-    return json({ users, settings: { registration: settings.registration, invite: settings.invite, maxUsers: settings.maxUsers, notice: settings.notice } });
+    return json({ users, settings: { registration: settings.registration, invite: settings.invite, maxUsers: settings.maxUsers, notice: settings.notice, legal: settings.legal || {} } });
   }
   if (request.method !== 'POST') return json({ error: 'method' }, 405);
   const input = await body(request);
@@ -414,6 +415,11 @@ async function adminApi(request, url, env) {
     if (typeof input.invite === 'string') next.invite = input.invite.trim().slice(0, 60);
     if (Number.isFinite(+input.maxUsers) && +input.maxUsers >= 1) next.maxUsers = Math.min(5000, Math.floor(+input.maxUsers));
     if (typeof input.notice === 'string') next.notice = input.notice.trim().slice(0, 300);
+    if (input.legal && typeof input.legal === 'object') {
+      // Angaben für Impressum und Datenschutzerklärung – öffentlich sichtbar unter /impressum.
+      const clip = (v, n) => String(v || '').trim().slice(0, n);
+      next.legal = { name: clip(input.legal.name, 120), address: clip(input.legal.address, 400), email: clip(input.legal.email, 120), extra: clip(input.legal.extra, 400) };
+    }
     if (next.registration === 'invite' && !next.invite) return json({ error: 'invite' }, 400);
     await saveSettings(kv, next);
     return json({ ok: true });
@@ -481,13 +487,16 @@ export async function handleGate(request, env) {
   const path = url.pathname;
   if (env.open) {
     if (path.startsWith('/api/auth/')) return json({ configured: false, authenticated: true, open: true });
-    if (path.startsWith('/api/admin/') || path.startsWith('/api/sync') || path === '/admin') return json({ error: 'off' }, 404);
+    if (path.startsWith('/api/admin/') || path.startsWith('/api/sync') || path === '/admin' || path === '/impressum' || path === '/datenschutz') return json({ error: 'off' }, 404);
     return null;
   }
   if (path === '/admin' || path === '/admin/') return html(adminPage({ nonce: randomToken(12) }));
   if (path.startsWith('/api/admin/')) return adminApi(request, url, env);
 
   const settings = await loadSettings(env.kv);
+  // Impressum und Datenschutzerklärung sind ohne Anmeldung lesbar.
+  if (path === '/impressum') return html(impressumPage(settings.legal));
+  if (path === '/datenschutz') return html(privacyPage(settings.legal));
   if (path.startsWith('/api/auth/')) return authApi(request, url, env, settings);
 
   if (path.startsWith('/api/')) {

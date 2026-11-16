@@ -135,6 +135,21 @@ export function adminPage({ nonce = '' } = {}) {
   </div>
 
   <div class="panel">
+    <h2>Impressum und Datenschutz</h2>
+    <p class="muted">Diese Angaben erscheinen öffentlich auf den Seiten <a class="link" href="/impressum" target="_blank" rel="noopener" style="margin:0">Impressum</a> und <a class="link" href="/datenschutz" target="_blank" rel="noopener" style="margin:0">Datenschutz</a> – auch für nicht angemeldete Besucher. Ein Impressum braucht einen echten Namen und eine Anschrift, unter der Post dich erreicht.</p>
+    <div class="grid">
+      <div><label for="g-name">Vor- und Nachname</label><input class="small" id="g-name" type="text" maxlength="120" autocomplete="name"></div>
+      <div><label for="g-email">E-Mail für Anfragen</label><input class="small" id="g-email" type="email" maxlength="120" autocomplete="email"></div>
+    </div>
+    <label for="g-address">Anschrift (Straße und Hausnummer, PLZ und Ort – jede Zeile einzeln)</label>
+    <textarea class="small" id="g-address" rows="3" maxlength="400" autocomplete="street-address"></textarea>
+    <label for="g-extra">Zusatz (freiwillig, z. B. Telefon)</label>
+    <textarea class="small" id="g-extra" rows="2" maxlength="400"></textarea>
+    <div class="row" style="margin-top:12px"><button class="btn primary" type="button" id="g-save">Speichern</button></div>
+    <p class="msg" id="m-legal" role="status"></p>
+  </div>
+
+  <div class="panel">
     <h2>Sicherheit</h2>
     <div class="grid">
       <div><label for="p-cur">Aktuelles Betreiber-Passwort</label><input class="small" id="p-cur" type="password" autocomplete="current-password"></div>
@@ -194,6 +209,8 @@ export function adminPage({ nonce = '' } = {}) {
     users = r.data.users;
     const s = r.data.settings;
     $('s-reg').value = s.registration; $('s-invite').value = s.invite || ''; $('s-max').value = s.maxUsers; $('s-notice').value = s.notice || '';
+    const g = s.legal || {};
+    $('g-name').value = g.name || ''; $('g-email').value = g.email || ''; $('g-address').value = g.address || ''; $('g-extra').value = g.extra || '';
     const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
     $('st-users').textContent = users.length + ' / ' + s.maxUsers;
     $('st-week').textContent = users.filter((u) => u.seen >= weekAgo).length;
@@ -241,6 +258,10 @@ export function adminPage({ nonce = '' } = {}) {
     const r = await api('settings', { registration: $('s-reg').value, invite: $('s-invite').value, maxUsers: +$('s-max').value, notice: $('s-notice').value });
     say('m-settings', r.ok ? 'Gespeichert.' : (TEXT[r.data.error] || 'Das hat nicht geklappt.'), !r.ok);
     if (r.ok) dashboard();
+  };
+  $('g-save').onclick = async () => {
+    const r = await api('settings', { legal: { name: $('g-name').value, email: $('g-email').value, address: $('g-address').value, extra: $('g-extra').value } });
+    say('m-legal', r.ok ? 'Gespeichert – die Seiten Impressum und Datenschutz zeigen die Angaben ab sofort.' : 'Das hat nicht geklappt.', !r.ok);
   };
   $('p-save').onclick = async () => {
     const r = await api('password', { current: $('p-cur').value, next: $('p-new').value });

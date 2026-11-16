@@ -1137,6 +1137,7 @@ function bindAccount() {
   const fail = async (res) => (res ? TEXT[(await res.json().catch(() => ({}))).error] : null) || 'Das hat nicht geklappt.';
   $('btn-logout').hidden = false;
   $('acc-box').hidden = false;
+  $('foot-legal').hidden = false;
   $('acc-name').innerHTML = `Angemeldet als <b>${esc(me.name)}</b>.`;
   $('acc-site').value = me.site;
   $('acc-chesscom').value = me.chesscom || '';

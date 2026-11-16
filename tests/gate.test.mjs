@@ -166,3 +166,26 @@ test('Ohne Anmeldung (REQUIRE_LOGIN=false): alles offen, aber keine Konten und k
   assert.equal((await handleGate(get('/api/sync'), env)).status, 404);
   assert.equal((await handleGate(get('/admin'), env)).status, 404);
 });
+
+test('Impressum und Datenschutz: ohne Anmeldung lesbar, Angaben kommen aus der Verwaltung', async () => {
+  const env = newEnv();
+  const before = await (await handleGate(get('/impressum', null, 'text/html'), env)).text();
+  assert.match(before, /noch keine Angaben hinterlegt/);
+  assert.match(await (await handleGate(get('/datenschutz', null, 'text/html'), env)).text(), /Datenschutzerklärung/);
+  // Die Anmeldeseite verlinkt beide Seiten
+  assert.match(await (await handleGate(get('/', null, 'text/html'), env)).text(), /href="\/impressum"[\s\S]*href="\/datenschutz"/);
+
+  await handleGate(post('/api/admin/setup', { password: 'betreiber-1' }), env);
+  const admin = cookieOf(await handleGate(post('/api/admin/login', { password: 'betreiber-1' }), env));
+  // Ohne Betreiber-Anmeldung lässt sich nichts ändern
+  assert.equal((await handleGate(post('/api/admin/settings', { legal: { name: 'Fremder' } }), env)).status, 401);
+  const legal = { name: 'Erika <b>Muster</b>', address: 'Musterweg 1\n12345 Musterstadt', email: 'erika@example.org', extra: '' };
+  assert.equal((await handleGate(post('/api/admin/settings', { legal }, admin), env)).status, 200);
+  const page = await (await handleGate(get('/impressum', null, 'text/html'), env)).text();
+  assert.match(page, /Erika &lt;b&gt;Muster&lt;\/b&gt;<br>Musterweg 1<br>12345 Musterstadt<br>E-Mail: <a href="mailto:erika@example.org">/);
+  assert.ok(!page.includes('<b>Muster</b>'), 'Eingaben werden nicht als HTML ausgegeben');
+  assert.match(await (await handleGate(get('/datenschutz', null, 'text/html'), env)).text(), /Musterweg 1/);
+  // Die übrigen Einstellungen bleiben beim Speichern der Angaben unberührt
+  const s = (await (await handleGate(get('/api/admin/users', admin), env)).json()).settings;
+  assert.deepEqual([s.registration, s.maxUsers, s.legal.name], ['open', 50, 'Erika <b>Muster</b>']);
+});

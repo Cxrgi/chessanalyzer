@@ -1,6 +1,6 @@
 // Service Worker: macht die Seite offline nutzbar und spart Anfragen an den Server.
 // Bei jeder Veröffentlichung VERSION ändern – dann holen sich alle Geräte die neuen Dateien.
-const VERSION = '2026-11-16b';
+const VERSION = '2026-11-16c';
 const CACHE = 'ca-' + VERSION;
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -58,7 +58,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
   const path = url.pathname;
-  if (path.includes('/api/') || path.includes('/.netlify/') || path.endsWith('/sw.js') || path.endsWith('/admin')) return;
+  if (path.includes('/api/') || path.includes('/.netlify/') || path.endsWith('/sw.js') || /\/(admin|impressum|datenschutz)$/.test(path)) return;
   if (request.mode === 'navigate') event.respondWith(page(request));
   else if (/\/(vendor|assets|data)\//.test(path)) event.respondWith(cacheFirst(request, false));
   else if (/\/(js|css)\//.test(path) || path.endsWith('/manifest.webmanifest')) event.respondWith(cacheFirst(request, true));

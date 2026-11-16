@@ -65,8 +65,9 @@ Nicht mit Chess.com verbunden. Die komplette Analyse läuft im Browser auf deine
 - Umgebungsvariable `SETUP_TOKEN`: Ist sie gesetzt, kann nur jemand mit diesem Code das erste Betreiber-Passwort festlegen.
 - `REQUIRE_LOGIN=false` (oder lokal `NO_PASSWORD=1 npm start`) schaltet Anmeldung, Konten und Synchronisierung ab;
   dann liegt alles nur im jeweiligen Browser. Dasselbe gilt für rein statisches Hosting (z. B. GitHub Pages).
-- Wer die Seite öffentlich mit Konten betreibt, speichert personenbezogene Daten und braucht in Deutschland in der
-  Regel ein Impressum und eine Datenschutzerklärung.
+- **Impressum und Datenschutzerklärung** stehen unter `/impressum` und `/datenschutz` (ohne Anmeldung lesbar, verlinkt
+  auf der Anmeldeseite und in der App). Name, Anschrift und E-Mail des Betreibers werden in der Verwaltung eingetragen –
+  sie stehen also nicht im Code. Die Texte beschreiben, was die Seite technisch tut; sie ersetzen keine Rechtsberatung.
 
 ## Starten
 
@@ -160,6 +161,7 @@ server/gate.mjs       Anmeldung: Benutzerkonten und Verwaltung (lokaler Server u
 server/sync.mjs       Synchronisierung je Konto
 server/login-page.mjs Anmelde- und Registrierungsseite
 server/admin-page.mjs Verwaltung (/admin)
+server/legal-pages.mjs Impressum und Datenschutzerklärung
 js/sync.js            Synchronisierung im Browser, Sicherungs-Code (Zusammenführen: js/sync-merge.js)
 data/openings.json    Eröffnungsbuch (erzeugt mit tools/build-openings.mjs)
 server.js             Lokaler Server mit /api/game

@@ -97,10 +97,11 @@ export function loginPage({ nonce = '', registration = 'open', notice = '' } = {
       <label for="r-lichess">Dein Benutzername auf Lichess</label>
       <input id="r-lichess" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" maxlength="40">
     </div>
-    <p class="note">Damit findet die Seite deine eigenen Partien. Du kannst das später in den Einstellungen ändern.</p>
+    <p class="note">Damit findet die Seite deine eigenen Partien. Du kannst das später in den Einstellungen ändern. Was gespeichert wird, steht in der <a class="link" href="/datenschutz" style="margin:0">Datenschutzerklärung</a>.</p>
     <button class="go" type="submit">Konto erstellen</button>
     <p class="err" id="e-register" role="alert"></p>
   </form>
+  <p class="note" style="text-align:center;margin-top:18px"><a class="link" href="/impressum" style="margin:0">Impressum</a> · <a class="link" href="/datenschutz" style="margin:0">Datenschutz</a></p>
 </main>
 <script nonce="${nonce}">
   const $ = (id) => document.getElementById(id);
