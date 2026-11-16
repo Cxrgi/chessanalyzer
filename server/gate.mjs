@@ -221,7 +221,7 @@ export async function handleGate(request, env) {
     return new Response(loginPage(cfg ? 'login' : 'setup', { nonce, needsToken: !cfg && !!env.setupToken }), {
       status: 200,
       headers: {
-        'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex',
+        'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex', 'X-Gate': 'login',
         'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
       },
     });

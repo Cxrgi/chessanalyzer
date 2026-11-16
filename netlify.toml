@@ -16,6 +16,12 @@
     Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
     Content-Security-Policy = "base-uri 'self'; object-src 'none'; form-action 'self'"
 
+# Der Service Worker muss immer frisch geprüft werden, sonst kommen Updates nicht an.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+
 # Lange cachen, was sich selten ändert – das spart Anfragen (und damit Netlify-Kontingent).
 [[headers]]
   for = "/vendor/*"

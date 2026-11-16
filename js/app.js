@@ -128,6 +128,55 @@ function init() {
   initAccount();
   routeFromHash();
   watchHostBadge();
+  initOffline();
+  bindSwipe();
+  $('skip-link').onclick = (e) => {
+    e.preventDefault();
+    const main = [...document.querySelectorAll('main')].find((m) => !m.hidden);
+    if (main) { main.tabIndex = -1; main.focus(); }
+  };
+}
+
+/**
+ * Offline-Modus: Ein Service Worker hält die Seite im Gerätespeicher. Das macht sie ohne Netz
+ * nutzbar und spart Anfragen an den Server. Nach einem Update lädt die Startseite einmal neu.
+ */
+function initOffline() {
+  if (!('serviceWorker' in navigator) || (location.protocol !== 'https:' && location.hostname !== 'localhost')) return;
+  const had = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!had || reloaded || S.view !== 'hub') return;
+    reloaded = true;
+    location.reload();
+  });
+}
+
+/** Entfernt Service Worker und Zwischenspeicher (beim Abmelden – danach liegt nichts mehr offline vor). */
+async function clearOffline() {
+  try {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(regs.map((r) => r.unregister()));
+    for (const key of await caches.keys()) await caches.delete(key);
+  } catch (e) { /* nicht unterstützt – dann gibt es auch nichts zu löschen */ }
+}
+
+/** Auf dem Handy: über Coach oder Zugliste wischen blättert einen Zug vor oder zurück. */
+function bindSwipe() {
+  let start = null;
+  const panel = document.querySelector('.panel');
+  panel.addEventListener('touchstart', (e) => {
+    const t = e.touches[0];
+    start = e.touches.length === 1 && !e.target.closest('input, select, textarea, .graph-wrap, .palette') ? { x: t.clientX, y: t.clientY, at: Date.now() } : null;
+  }, { passive: true });
+  panel.addEventListener('touchend', (e) => {
+    if (!start || S.view !== 'moves' || (S.mode !== 'game' && S.mode !== 'board')) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - start.x, dy = t.clientY - start.y;
+    if (Date.now() - start.at < 600 && Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 2) (dx < 0 ? next : prev)();
+    start = null;
+  }, { passive: true });
 }
 
 /**
@@ -993,6 +1042,7 @@ async function initAccount() {
   $('btn-logout').hidden = false;
   $('pw-box').hidden = false;
   $('btn-logout').onclick = async () => {
+    await clearOffline();
     await fetch('api/auth/logout', { method: 'POST' }).catch(() => {});
     location.href = location.pathname;
   };
@@ -1774,6 +1824,29 @@ function render() {
   renderTools();
   highlightMove();
   renderGraphs();
+  announce();
+}
+
+/** Sagt Screenreadern, welcher Zug gerade zu sehen ist. */
+function announce() {
+  let text = '';
+  if (S.mode === 'game' && !S.variation && !S.retry && S.ply > 0) {
+    const m = S.game.moves[S.ply - 1];
+    const cls = S.review.moves[S.ply - 1].cls;
+    text = `Zug ${Math.ceil(S.ply / 2)}, ${SIDE[m.color]}: ${spokenMove(m)}. ${CLASSES[cls].label || ''}`;
+  } else if (S.variation && S.variation.idx > 0) {
+    const m = S.variation.moves[S.variation.idx - 1];
+    text = `${SIDE[m.color]}: ${spokenMove(m)}`;
+  }
+  $('sr-status').textContent = text;
+  $('board').setAttribute('aria-label', `Schachbrett. ${new Chess(currentFen()).turn() === 'w' ? 'Weiß' : 'Schwarz'} am Zug.`);
+}
+
+function spokenMove(m) {
+  if (/^O-O-O/.test(m.san)) return 'lange Rochade';
+  if (/^O-O/.test(m.san)) return 'kurze Rochade';
+  const names = { p: 'Bauer', n: 'Springer', b: 'Läufer', r: 'Turm', q: 'Dame', k: 'König' };
+  return `${names[m.piece]} ${m.from} ${m.captured ? 'schlägt auf' : 'nach'} ${m.to}${/#/.test(m.san) ? ', Schachmatt' : /\+/.test(m.san) ? ', Schach' : ''}`;
 }
 
 const tint = (hex, a) => {
@@ -1901,6 +1974,8 @@ function renderEvalBar(ev) {
   const num = $('evalbar-num');
   num.textContent = evalText(ev).replace(/^[+-]/, '');
   num.className = 'evalbar-num ' + (w >= 50 ? 'w' : 'b');
+  const lead = ev.type === 'mate' ? `Matt in ${Math.abs(ev.value)} für ${w > 50 ? 'Weiß' : 'Schwarz'}` : Math.abs(ev.value) < 30 ? 'ausgeglichen' : `${w > 50 ? 'Weiß' : 'Schwarz'} steht besser`;
+  $('evalbar').setAttribute('aria-label', `Bewertung ${evalText(ev)}, ${lead}`);
 }
 
 function evalChip(ev) {
