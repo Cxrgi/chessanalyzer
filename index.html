@@ -179,6 +179,12 @@
         </div>
         <div class="variation" id="variation" hidden></div>
         <div class="lines" id="lines"></div>
+        <div class="mv-tools" id="mv-tools">
+          <button type="button" class="chip" id="mt-bad" title="Nur Züge mit Fehlern zeigen (X)">Nur Fehler</button>
+          <button type="button" class="chip" id="mt-threat" title="Was droht, wenn nichts passiert? (D)">Drohung zeigen</button>
+          <button type="button" class="chip" id="mt-deep" title="Diese Stellung gründlicher berechnen">Tiefer rechnen</button>
+        </div>
+        <p class="mv-note" id="mv-note" hidden></p>
         <div class="moves" id="moves" tabindex="-1"></div>
         <div class="graph-wrap small"><svg id="graph-moves" class="graph" viewBox="0 0 400 60" preserveAspectRatio="none"></svg></div>
       </section>
@@ -295,6 +301,8 @@
       <h3>Analysetiefe</h3>
       <div class="seg" id="set-depth"></div>
       <p class="hint">Tiefer = genauer, dauert aber länger. Gilt ab der nächsten Analyse.</p>
+      <div id="set-more"></div>
+      <button type="button" class="btn soft small" id="btn-keys">Tastenkürzel anzeigen</button>
       <div id="pw-box" hidden>
         <h3>Passwort ändern</h3>
         <div class="pw-form">
@@ -306,6 +314,25 @@
         <button type="button" class="btn soft small" id="pw-logout-all">Auf allen anderen Geräten abmelden</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- Tastenkürzel ----------------------------------------------------------->
+  <dialog id="keys" class="dialog">
+    <div class="keys-body">
+      <header><h2>Tastenkürzel und Maus</h2><button type="button" class="icon-btn" id="keys-close" aria-label="Schließen">✕</button></header>
+      <table class="keys">
+        <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Zug zurück / Zug vor</td></tr>
+        <tr><td><kbd>Pos1</kbd> <kbd>Ende</kbd></td><td>Zum Anfang / zum Ende</td></tr>
+        <tr><td><kbd>N</kbd> / <kbd>Umschalt</kbd>+<kbd>N</kbd></td><td>Nächster / vorheriger Schlüsselmoment</td></tr>
+        <tr><td><kbd>F</kbd></td><td>Brett drehen</td></tr>
+        <tr><td><kbd>D</kbd></td><td>Drohung zeigen</td></tr>
+        <tr><td><kbd>X</kbd></td><td>Nur Fehler in der Zugliste</td></tr>
+        <tr><td><kbd>?</kbd></td><td>Diese Übersicht</td></tr>
+        <tr><td>Mausrad</td><td>Über dem Brett durch die Züge blättern</td></tr>
+        <tr><td>Rechtsklick</td><td>Feld markieren; ziehen = Pfeil zeichnen. Linksklick räumt auf.</td></tr>
+        <tr><td><kbd>Leertaste</kbd> / <kbd>Enter</kbd></td><td>In Lektionen und Aufgaben: weiter</td></tr>
+      </table>
+    </div>
   </dialog>
 
   <script type="module" src="js/app.js"></script>

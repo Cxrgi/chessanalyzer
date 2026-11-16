@@ -7,17 +7,17 @@ import { initProfile, renderProfile, dayStreak, TAGS } from './profile.js';
 import { initPlay, openPlay, playTargets, playMove, leavePlay } from './play.js';
 import { initLessons, renderLessonList, openLesson, lessonTargets, lessonMove, lessonKey, lessonProgress } from './lessons.js';
 import { Board } from './board.js';
-import { AnalysisPool, LiveEngine, warmEngine } from './engine.js';
+import { AnalysisPool, LiveEngine, EnginePlayer, warmEngine } from './engine.js';
 import { db, migrateLegacy } from './db.js';
 import { parseLichessLink, loadLichessGame, fetchLichessGames } from './lichess.js';
 import { buildPgn, splitPgn, pgnTag, packPgn, unpackPgn } from './pgn.js';
-import { gameSummary, mistakeCards, timeReport, timeSpent } from './insights.js';
-import { reviewGame, bookMoves, winPct, evalText, CLASSES, CLASS_ORDER, BAD } from './analysis.js';
-import { explainMove, summarize, resultText, describeMove, pvToMoves, lineText, sanDe, say } from './coach.js';
+import { gameSummary, mistakeCards, mistakeTag, timeReport, timeSpent } from './insights.js';
+import { reviewGame, bookMoves, winPct, evalText, CLASSES, CLASS_ORDER, BAD, STRICTNESS, setPalette } from './analysis.js';
+import { explainMove, summarize, resultText, describeMove, pvToMoves, lineText, sanDe, say, setNotation } from './coach.js';
 import { parseGameLink, loadByLink, gameFromPgn, gameFromArchive, fetchRecentGames, fetchAvatar, LoadError } from './chesscom.js';
-import { materialInfo } from './tactics.js';
+import { materialInfo, flipTurn } from './tactics.js';
 import { classIcon, uiIcon } from './icons.js';
-import { playSound, setSoundEnabled } from './sound.js';
+import { playSound, setSoundEnabled, setVolume } from './sound.js';
 import { DEMO_PGN } from './demo.js';
 
 const $ = (id) => document.getElementById(id);
@@ -35,6 +35,17 @@ const THEMES = {
 };
 const PIECE_SETS = { cburnett: 'Klassisch', chessnut: 'Modern', merida: 'Merida' };
 const DEPTHS = { 12: 'Schnell', 16: 'Normal', 20: 'Tief' };
+// Weitere Einstellungen: [Schlüssel, Überschrift, Auswahl]
+const OPTIONS = [
+  ['mode', 'Design', { dark: 'Dunkel', light: 'Hell' }],
+  ['size', 'Brettgröße', { small: 'Klein', medium: 'Mittel', auto: 'Groß' }],
+  ['notation', 'Schreibweise der Züge', { de: 'Deutsch (S, L, T, D)', en: 'Englisch (N, B, R, Q)', fig: 'Figuren (♘ ♗ ♖ ♕)' }],
+  ['strict', 'Bewertung der Züge', { mild: 'Nachsichtig', normal: 'Normal', strict: 'Streng' }],
+  ['lines', 'Engine-Linien', { 0: 'Aus', 1: '1', 2: '2', 3: '3', 5: '5' }],
+  ['palette', 'Farben der Zugbewertung', { normal: 'Standard', safe: 'Für Farbenblinde' }],
+];
+const TOGGLES = [['anim', 'Figuren gleiten lassen'], ['dots', 'Mögliche Züge als Punkte zeigen'], ['lastMove', 'Letzten Zug farbig markieren']];
+const DEFAULTS = { theme: 'green', pieces: 'cburnett', depth: 16, sound: true, volume: 0.7, mode: 'dark', size: 'auto', notation: 'de', strict: 'normal', lines: 3, palette: 'normal', anim: true, dots: true, lastMove: true };
 
 // ---------------------------------------------------------------------------
 // Zustand & Speicher
@@ -63,7 +74,7 @@ const store = {
 };
 
 const S = {
-  settings: { theme: 'green', pieces: 'cburnett', depth: 16, sound: true, ...store.get('settings', {}) },
+  settings: { ...DEFAULTS, ...store.get('settings', {}) },
   username: store.get('username', ''),
   site: store.get('site', 'chesscom'),
   view: 'home',
@@ -82,7 +93,9 @@ const S = {
 };
 
 const live = new LiveEngine();
+const scale = () => STRICTNESS[S.settings.strict] || 1;
 let board;
+let threatEngine = null;
 
 // ---------------------------------------------------------------------------
 // Start
@@ -154,6 +167,17 @@ function applySettings() {
   if (!PIECE_SETS[S.settings.pieces]) S.settings.pieces = 'cburnett';
   board.setPieceSet(S.settings.pieces);
   setSoundEnabled(S.settings.sound);
+  setVolume(+S.settings.volume);
+  setNotation(S.settings.notation);
+  setPalette(S.settings.palette === 'safe');
+  live.multipv = Math.max(1, +S.settings.lines || 1);
+  const root = document.documentElement;
+  root.dataset.mode = S.settings.mode === 'light' ? 'light' : 'dark';
+  root.dataset.size = S.settings.size;
+  root.classList.toggle('no-motion', !S.settings.anim);
+  root.classList.toggle('no-dots', !S.settings.dots);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = S.settings.mode === 'light' ? '#eef1f5' : '#11151b';
   $('btn-sound').innerHTML = uiIcon(S.settings.sound ? 'sound' : 'mute', 20);
   store.set('settings', S.settings);
   if (S.view !== 'home' && S.game) renderPlayers();
@@ -169,8 +193,25 @@ function buildSettingsDialog() {
         <i class="pc" style="background-image:url('assets/pieces/${k}/wN.svg')"></i>${name}</button>`).join('');
     $('set-depth').innerHTML = Object.entries(DEPTHS).map(([d, name]) =>
       `<button type="button" class="${+d === S.settings.depth ? 'on' : ''}" data-depth="${d}">${name}</button>`).join('');
+    $('set-more').innerHTML = OPTIONS.map(([key, title, choices]) =>
+      `<h3>${title}</h3><div class="seg n${Object.keys(choices).length}">` + Object.entries(choices).map(([v, name]) =>
+        `<button type="button" class="${String(S.settings[key]) === v ? 'on' : ''}" data-opt="${key}" data-value="${v}">${name}</button>`).join('') + '</div>').join('')
+      + '<h3>Brett und Ton</h3>'
+      + TOGGLES.map(([key, title]) => `<label class="toggle"><input type="checkbox" data-toggle="${key}" ${S.settings[key] ? 'checked' : ''}> ${title}</label>`).join('')
+      + `<label class="toggle range">Lautstärke <input type="range" id="set-volume" min="0" max="1" step="0.05" value="${S.settings.volume}"></label>`;
   };
   draw();
+  $('settings').addEventListener('change', (e) => {
+    const t = e.target;
+    if (t.dataset.toggle) S.settings[t.dataset.toggle] = t.checked;
+    else if (t.id === 'set-volume') {
+      S.settings.volume = +t.value;
+      S.settings.sound = S.settings.volume > 0;
+    } else return;
+    applySettings();
+    if (t.id === 'set-volume') playSound('move');
+    refreshAfterSettings();
+  });
   $('settings').addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (e.target === $('settings')) $('settings').close();
@@ -178,12 +219,30 @@ function buildSettingsDialog() {
     if (b.dataset.theme) S.settings.theme = b.dataset.theme;
     else if (b.dataset.pieces) S.settings.pieces = b.dataset.pieces;
     else if (b.dataset.depth) S.settings.depth = +b.dataset.depth;
+    else if (b.dataset.opt) S.settings[b.dataset.opt] = b.dataset.opt === 'lines' ? +b.dataset.value : b.dataset.value;
     else return;
     applySettings();
     draw();
+    refreshAfterSettings(b.dataset.opt);
   });
+  $('btn-keys').onclick = () => { $('settings').close(); $('keys').showModal(); };
+  $('keys-close').onclick = () => $('keys').close();
+  $('keys').addEventListener('click', (e) => { if (e.target === $('keys')) $('keys').close(); });
   $('btn-settings').onclick = () => $('settings').showModal();
   $('settings-close').onclick = () => $('settings').close();
+}
+
+/** Zeichnet neu, was von einer geänderten Einstellung abhängt (Notation, Strenge, Farben …). */
+function refreshAfterSettings(opt) {
+  if (S.mode !== 'game' || !S.review) {
+    if (S.mode === 'board' && S.variation) render();
+    return;
+  }
+  if (opt === 'strict') S.review = reviewGame(S.game, S.review.positions, S.book, scale());
+  buildMoveList();
+  if (S.view === 'overview') renderOverview();
+  else if (S.view === 'moves') render();
+  renderGraphs();
 }
 
 function bindEvents() {
@@ -340,6 +399,11 @@ function bindEvents() {
       if (trainingKey(e.key)) e.preventDefault();
       return;
     }
+    if (e.key === '?') {
+      $('keys').showModal();
+      e.preventDefault();
+      return;
+    }
     if (S.view !== 'moves' && S.view !== 'overview') return;
     if (e.key === 'ArrowRight') {
       if (S.view === 'overview') { showMoves(); go(0); } else next();
@@ -347,13 +411,49 @@ function bindEvents() {
     else if (e.key === 'Home') $('ctl-first').click();
     else if (e.key === 'End') $('ctl-last').click();
     else if (e.key.toLowerCase() === 'f') flip();
-    else if (e.key.toLowerCase() === 'n' && S.view === 'moves' && S.mode === 'game') nextKey();
+    else if (e.key.toLowerCase() === 'n' && S.view === 'moves' && S.mode === 'game') (e.shiftKey ? prevKey() : nextKey());
+    else if (e.key.toLowerCase() === 'd' && S.view === 'moves') showThreat();
+    else if (e.key.toLowerCase() === 'x' && S.view === 'moves' && S.mode === 'game') toggleOnlyBad();
     else return;
     e.preventDefault();
   });
   window.addEventListener('resize', () => {
     if (S.review) renderGraphs();
   });
+  // Mausrad über dem Brett blättert durch die Züge
+  let wheelAt = 0;
+  $('board').addEventListener('wheel', (e) => {
+    if (S.view !== 'moves' || (S.mode !== 'game' && S.mode !== 'board')) return;
+    e.preventDefault();
+    if (Math.abs(e.deltaY) < 4 || e.timeStamp - wheelAt < 70) return;
+    wheelAt = e.timeStamp;
+    if (e.deltaY > 0) next();
+    else prev();
+  }, { passive: false });
+  $('mt-bad').onclick = toggleOnlyBad;
+  $('mt-threat').onclick = showThreat;
+  $('mt-deep').onclick = deepen;
+  for (const id of ['graph-overview', 'graph-moves']) {
+    const wrap = $(id).parentElement;
+    const tip = document.createElement('div');
+    tip.className = 'graph-tip';
+    tip.hidden = true;
+    wrap.appendChild(tip);
+    wrap.addEventListener('pointermove', (e) => {
+      if (!S.review || !S.game) return;
+      const rect = wrap.getBoundingClientRect();
+      const n = S.game.moves.length;
+      const ply = Math.max(0, Math.min(n, Math.round(((e.clientX - rect.left) / rect.width) * n)));
+      const m = ply ? S.game.moves[ply - 1] : null;
+      const startNo = +S.game.startFen.split(' ')[5] || 1;
+      const offset = S.game.moves[0].color === 'b' ? 1 : 0;
+      const label = m ? `${startNo + Math.floor((ply - 1 + offset) / 2)}${m.color === 'w' ? '.' : '…'} ${sanDe(m.san)}` : 'Start';
+      tip.textContent = `${label} · ${evalText(S.review.evals[ply])}`;
+      tip.hidden = false;
+      tip.style.left = Math.max(2, Math.min(rect.width - tip.offsetWidth - 2, e.clientX - rect.left - tip.offsetWidth / 2)) + 'px';
+    });
+    wrap.addEventListener('pointerleave', () => { tip.hidden = true; });
+  }
   window.addEventListener('hashchange', routeFromHash);
 }
 
@@ -677,7 +777,7 @@ function keepAwake() {
 /** Zeigt genau einen Hauptbereich: hub | home | lessons | review. */
 function showMain(name) {
   for (const id of ['hub', 'home', 'lessons', 'profile', 'review']) $(id).hidden = id !== name;
-  $('btn-new').hidden = name === 'hub';
+  $('btn-new').hidden = $('btn-board').hidden = name === 'hub';
 }
 
 /** Räumt auf, bevor ein anderer Bereich geöffnet wird (Engine stoppen, Sondermodi beenden). */
@@ -949,7 +1049,7 @@ async function batchAnalyze(n, report) {
     const depth = S.settings.depth;
     const positions = await runEngine(game, book, depth, new AnalysisPool(), null);
     if (game.drawn) positions[positions.length - 1] = { lines: [], eval: { type: 'cp', value: 0 }, terminal: 'draw' };
-    const review = reviewGame(game, positions, book);
+    const review = reviewGame(game, positions, book, scale());
     const you = game.white.name.toLowerCase() === me ? 'w' : game.black.name.toLowerCase() === me ? 'b' : null;
     await saveGame({ game, positions: review.positions, review, you }, positions, depth);
     bump('games');
@@ -1049,7 +1149,8 @@ async function startGame(game, cached) {
   // Remis durch Stellungswiederholung oder 50-Züge-Regel: Die Schlussstellung ist remis, egal was die Engine meint
   if (game.drawn) positions[positions.length - 1] = { lines: [], eval: { type: 'cp', value: 0 }, terminal: 'draw' };
   if (S.game !== game) return;
-  S.review = reviewGame(game, positions, book);
+  S.book = book;
+  S.review = reviewGame(game, positions, book, scale());
   buildMoveList();
   showOverview();
   saveGame(ctx(), positions, (cached && cached.depth) || S.settings.depth).catch((e) => console.error(e));
@@ -1281,6 +1382,109 @@ function nextKey() {
   go(n);
 }
 
+/** Springt zum vorherigen Schlüsselmoment. */
+function prevKey() {
+  const from = S.retry ? S.retry.k + 1 : S.variation ? S.variation.returnPly : S.ply;
+  for (let k = from - 2; k >= 0; k--) {
+    if (KEY_CLASSES.has(S.review.moves[k].cls)) {
+      go(k + 1);
+      return;
+    }
+  }
+  go(0);
+}
+
+function toggleOnlyBad() {
+  const on = !$('moves').classList.contains('only-bad');
+  $('moves').classList.toggle('only-bad', on);
+  $('mt-bad').classList.toggle('on', on);
+  highlightMove();
+}
+
+/**
+ * „Was droht?“ – die Engine darf für die Seite ziehen, die gerade NICHT am Zug ist.
+ * So sieht man, was passiert, wenn man die Drohung ignoriert.
+ */
+async function showThreat() {
+  if (S.view !== 'moves' || (S.mode !== 'game' && S.mode !== 'board')) return;
+  const fen = currentFen();
+  if (S.threat && S.threat.fen === fen) {
+    S.threat = null;
+    renderTools();
+    board.setDecor(boardDecor());
+    return;
+  }
+  const flipped = new Chess(fen).isGameOver() ? null : flipTurn(fen);
+  const t = { fen, busy: !!flipped, text: flipped ? 'Die Engine sucht die Drohung …' : 'Hier gibt es nichts zu drohen: Die Seite am Zug steht im Schach oder die Partie ist vorbei.' };
+  S.threat = t;
+  renderTools();
+  if (!flipped) return;
+  threatEngine = threatEngine || new EnginePlayer();
+  let lines = [];
+  try {
+    lines = await threatEngine.lines(flipped, { depth: 14, multipv: 1 });
+  } catch (e) { /* unten als „nichts gefunden“ behandelt */ }
+  if (S.threat !== t) return;
+  t.busy = false;
+  const mv = lines[0] ? pvToMoves(flipped, lines[0].pv, 1)[0] : null;
+  const who = SIDE[flipped.split(' ')[1]];
+  if (!mv) t.text = 'Keine Drohung gefunden.';
+  else {
+    t.move = mv;
+    const mate = lines[0].eval.type === 'mate';
+    const taken = { p: 'einen Bauern', n: 'einen Springer', b: 'einen Läufer', r: 'einen Turm', q: 'die Dame' }[mv.captured];
+    const what = /#/.test(mv.san) ? ' – das wäre Matt!' : mate ? ' – mit Mattangriff!' : taken ? ` und schlägt ${taken}.` : /\+/.test(mv.san) ? ' mit Schach.' : '. Eine direkte Drohung ist das nicht.';
+    t.text = `Ohne Gegenwehr spielt ${who} **${sanDe(mv.san)}**${what}`;
+  }
+  renderTools();
+  board.setDecor(boardDecor());
+}
+
+/** Rechnet die aktuelle Partiestellung deutlich tiefer nach (nur auf Wunsch, kostet Zeit). */
+function deepen() {
+  if (S.mode !== 'game' || S.view !== 'moves' || S.variation || S.retry) return;
+  const fen = currentFen();
+  if (S.live && S.live.deep && S.live.fen === fen) {
+    live.stop();
+    S.live = null;
+    render();
+    return;
+  }
+  const state = { fen, lines: [], terminal: null, deep: true };
+  S.live = state;
+  let timer = null;
+  live.analyze(fen, {
+    depth: 26,
+    onUpdate: (lines, terminal) => {
+      if (S.live !== state) return;
+      state.lines = lines;
+      state.terminal = terminal;
+      if (!timer) {
+        timer = setTimeout(() => {
+          timer = null;
+          if (S.live === state) { renderLines(); renderTools(); }
+        }, 200);
+      }
+    },
+  });
+  renderTools();
+}
+
+function renderTools() {
+  const game = S.mode === 'game';
+  $('mv-tools').hidden = S.mode !== 'game' && S.mode !== 'board';
+  $('mt-bad').hidden = !game;
+  $('mt-deep').hidden = !game || !!S.variation || !!S.retry;
+  const deep = S.live && S.live.deep && S.live.fen === currentFen();
+  $('mt-deep').classList.toggle('on', !!deep);
+  $('mt-deep').textContent = deep ? 'Tiefer rechnen: stoppen' : 'Tiefer rechnen';
+  const t = S.threat && S.threat.fen === currentFen() ? S.threat : null;
+  if (!t) S.threat = null;
+  $('mt-threat').classList.toggle('on', !!t);
+  $('mv-note').hidden = !t;
+  $('mv-note').innerHTML = t ? (t.busy ? '<span class="spinner"></span> ' : '') + md(t.text) : '';
+}
+
 function flip() {
   S.orientation = S.orientation === 'w' ? 'b' : 'w';
   board.setOrientation(S.orientation);
@@ -1459,6 +1663,7 @@ function startLive() {
 function currentLines() {
   const v = S.variation;
   if (S.retry) return [];
+  if (!v && S.live && S.live.deep && S.live.fen === currentFen() && S.live.lines[0] && S.live.lines[0].depth >= 14) return S.live.lines;
   if (v && (v.idx > 0 || S.mode === 'board')) return S.live && S.live.fen === currentFen() ? S.live.lines : [];
   return S.review.positions[v ? v.basePly : S.ply].lines;
 }
@@ -1547,6 +1752,7 @@ function render() {
   renderCoach();
   renderLines();
   renderVariationBar();
+  renderTools();
   highlightMove();
   renderGraphs();
 }
@@ -1609,6 +1815,10 @@ function boardDecor() {
     if ((cls === 'mistake' || cls === 'blunder') && reply) {
       decor.arrows.push({ from: reply.move.slice(0, 2), to: reply.move.slice(2, 4), color: CLASSES.blunder.color, opacity: 0.75 });
     }
+  }
+  if (!S.settings.lastMove && !S.retry) decor.squares = [];
+  if (S.threat && S.threat.move && S.threat.fen === currentFen() && !S.retry) {
+    decor.arrows.push({ from: S.threat.move.from, to: S.threat.move.to, color: CLASSES.blunder.color, opacity: 0.85 });
   }
   if (S.hoverArrow && !S.retry) {
     decor.arrows.push({ from: S.hoverArrow.slice(0, 2), to: S.hoverArrow.slice(2, 4), color: '#f7a531' });
@@ -1814,6 +2024,10 @@ function renderCoach() {
   const actions = [];
   if (ex.best) actions.push({ label: 'Bester Zug', icon: 'star', run: () => showBest(k) });
   if (BAD.has(ex.cls) && ex.best) actions.push({ label: 'Nochmal versuchen', icon: 'retry', run: () => startRetry(k) });
+  if (ex.cls === 'mistake' || ex.cls === 'blunder' || ex.cls === 'miss') {
+    const tag = TAGS[mistakeTag(ctx(), k)];
+    if (tag && tag.lesson) actions.push({ label: 'Lektion dazu', icon: 'book', run: () => { location.hash = '#lektion/' + tag.lesson; } });
+  }
   const paragraphs = ex.paragraphs.slice();
   if (S.ply === n) {
     const res = resultText(game);
@@ -1832,13 +2046,13 @@ function renderLines() {
     return;
   }
   const fen = currentFen();
-  const lines = currentLines();
+  const lines = S.settings.lines > 0 ? currentLines() : [];
   if (!lines.length) {
     el.innerHTML = '';
     return;
   }
   const depth = lines[0].depth ? ` · Tiefe ${lines[0].depth}` : '';
-  el.innerHTML = `<div class="lines-head">Engine-Linien${depth}</div>` + lines.slice(0, 3).map((l, i) => {
+  el.innerHTML = `<div class="lines-head">Engine-Linien${depth}</div>` + lines.slice(0, S.settings.lines).map((l, i) => {
     const moves = pvToMoves(fen, l.pv, 8);
     return `<button type="button" class="line" data-i="${i}" data-uci="${esc(l.move)}">${evalChip(l.eval)}<span class="line-moves">${esc(lineText(fen, moves))}</span></button>`;
   }).join('');
@@ -1863,19 +2077,23 @@ function buildMoveList() {
   let html = '';
   const startsBlack = game.moves[0].color === 'b';
   const first = +game.startFen.split(' ')[5] || 1;
+  const spent = timeSpent(game);
+  const isBad = (k) => k < game.moves.length && ['mistake', 'blunder', 'miss', 'inaccuracy'].includes(review.moves[k].cls);
+  const fmt = (t) => (t >= 60 ? Math.floor(t / 60) + ':' + String(Math.round(t % 60)).padStart(2, '0') : t < 10 ? t.toFixed(1) + 's' : Math.round(t) + 's');
   const cell = (k) => {
     const m = game.moves[k];
-    return `<button type="button" class="mv" data-ply="${k + 1}">${classIcon(review.moves[k].cls, 16)}<span>${esc(sanDe(m.san))}</span></button>`;
+    const t = spent && spent[k] != null ? `<em class="clk" title="Bedenkzeit für diesen Zug">${fmt(spent[k])}</em>` : '';
+    return `<button type="button" class="mv${isBad(k) ? ' bad' : ''}" data-ply="${k + 1}">${classIcon(review.moves[k].cls, 16)}<span>${esc(sanDe(m.san))}</span>${t}</button>`;
   };
   let k = 0;
   let num = first;
   if (startsBlack) {
-    html += `<div class="move-row"><span class="move-num">${num}.</span><span></span>${cell(0)}</div>`;
+    html += `<div class="move-row${isBad(0) ? ' has-bad' : ''}"><span class="move-num">${num}.</span><span></span>${cell(0)}</div>`;
     k = 1;
     num++;
   }
   for (; k < game.moves.length; k += 2, num++) {
-    html += `<div class="move-row"><span class="move-num">${num}.</span>${cell(k)}${k + 1 < game.moves.length ? cell(k + 1) : '<span></span>'}</div>`;
+    html += `<div class="move-row${isBad(k) || isBad(k + 1) ? ' has-bad' : ''}"><span class="move-num">${num}.</span>${cell(k)}${k + 1 < game.moves.length ? cell(k + 1) : '<span></span>'}</div>`;
   }
   html += `<div class="result-row">${esc(game.result === '*' ? '' : game.result.replace('1/2-1/2', '½–½'))}</div>`;
   $('moves').innerHTML = html;

@@ -21,7 +21,7 @@ const V2 = {
   gewinnt: 'gewinnst', tauscht: 'tauschst', greift: 'greifst', deckt: 'deckst', entwickelt: 'entwickelst',
   stellt: 'stellst', rückt: 'rückst', aktiviert: 'aktivierst', fesselt: 'fesselst', legt: 'legst',
   droht: 'drohst', verliert: 'verlierst', übersieht: 'übersiehst', konnte: 'konntest', kann: 'kannst',
-  steht: 'stehst', bekommt: 'bekommst', sichert: 'sicherst',
+  steht: 'stehst', bekommt: 'bekommst', sichert: 'sicherst', schafft: 'schaffst', dringt: 'dringst', nimmt: 'nimmst',
 };
 const V2_RE = new RegExp(`(?<![\\p{L}])(${Object.keys(V2).join('|')})(?![\\p{L}])`, 'gu');
 const second = (text) => text.replace(V2_RE, (w) => V2[w]);
@@ -48,9 +48,21 @@ function sayInv(ctx, color, verb) {
 
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
-/** SAN mit deutschen Figurenbuchstaben (S, L, T, D). */
+const NOTATION = {
+  de: { N: 'S', B: 'L', R: 'T', Q: 'D', K: 'K' },
+  en: { N: 'N', B: 'B', R: 'R', Q: 'Q', K: 'K' },
+  fig: { N: '♘', B: '♗', R: '♖', Q: '♕', K: '♔' },
+};
+let notation = NOTATION.de;
+
+/** Notation umstellen: 'de' (S, L, T, D), 'en' (N, B, R, Q) oder 'fig' (Figurinen). */
+export function setNotation(mode) {
+  notation = NOTATION[mode] || NOTATION.de;
+}
+
+/** SAN in der eingestellten Notation (Standard: deutsche Figurenbuchstaben). */
 export function sanDe(san) {
-  return san.replace(/[NBRQ]/g, (c) => ({ N: 'S', B: 'L', R: 'T', Q: 'D' }[c]));
+  return san.replace(/[NBRQK]/g, (c) => notation[c]);
 }
 
 /** Wandelt eine Engine-Variante (UCI) in ausgeschriebene Züge um. */
@@ -202,6 +214,42 @@ export function describeMove(fen, mv, prev, ply) {
     const ownHungAfter = new Set(hangingPieces(after, mover).map((h) => h.square));
     const saved = ownHungBefore.find((h) => h.square !== m.from && !ownHungAfter.has(h.square) && h.type !== 'p');
     if (saved) parts.push(`sichert ${ACC[saved.type]} auf ${saved.square}`);
+  }
+
+  // Strategische Merkmale (nur wenn noch Platz für einen zweiten Hinweis ist)
+  if (parts.length <= 1) {
+    const rank = +m.to[1];
+    const pawnsOn = (color, files, test) => {
+      for (const f of files) for (let r = 2; r <= 7; r++) {
+        const p = chess.get(f + r);
+        if (p && p.type === 'p' && p.color === color && test(r)) return true;
+      }
+      return false;
+    };
+    const near = [m.to[0], String.fromCharCode(m.to.charCodeAt(0) - 1), String.fromCharCode(m.to.charCodeAt(0) + 1)].filter((f) => f >= 'a' && f <= 'h');
+    const ahead = (r) => (mover === 'w' ? r > rank : r < rank);
+    if (m.piece === 'p' && !m.promotion && ply > 16 && !pawnsOn(enemy, near, ahead)) {
+      const before = new Chess(fen);
+      const wasPassed = m.from[0] === m.to[0] && !(() => {
+        const r0 = +m.from[1];
+        for (const f of near) for (let r = 2; r <= 7; r++) {
+          const p = before.get(f + r);
+          if (p && p.type === 'p' && p.color === enemy && (mover === 'w' ? r > r0 : r < r0)) return true;
+        }
+        return false;
+      })();
+      if (!wasPassed) parts.push('schafft einen Freibauern');
+    } else if (m.piece === 'r' && rank === (mover === 'w' ? 7 : 2) && m.from[1] !== m.to[1] && safeHere) {
+      parts.push(`dringt mit dem Turm auf die ${mover === 'w' ? '7.' : '2.'} Reihe ein`);
+    } else if (m.piece === 'n' && safeHere && (mover === 'w' ? rank >= 5 : rank <= 4)
+      && chess.attackers(m.to, mover).some((sq) => chess.get(sq).type === 'p')
+      && !pawnsOn(enemy, near.filter((f) => f !== m.to[0]), ahead)) {
+      parts.push('stellt den Springer auf einen Vorposten');
+    } else if (m.captured === 'b' && m.piece === 'n') {
+      let bishops = 0;
+      for (const row of chess.board()) for (const sq of row) if (sq && sq.type === 'b' && sq.color === enemy) bishops++;
+      if (bishops === 1) parts.push('nimmt dem Gegner das Läuferpaar');
+    }
   }
 
   const homeRank = mover === 'w' ? '1' : '8';
@@ -381,6 +429,17 @@ const BEST_PRAISE = [
   'Stark gespielt – das ist die erste Wahl der Engine.',
 ];
 
+const EXCELLENT = [
+  (b) => `Fast genauso stark wie der beste Zug **${b}**.`,
+  (b) => `Ein sehr guter Zug – die Engine hätte **${b}** einen Hauch besser gefunden.`,
+  (b) => `Kaum schlechter als **${b}**, die erste Wahl der Engine.`,
+];
+const GOOD = [
+  (b) => `Ein ordentlicher Zug – **${b}** war aber noch etwas genauer.`,
+  (b) => `Spielbar. Präziser war **${b}**.`,
+  (b) => `In Ordnung, auch wenn **${b}** mehr herausgeholt hätte.`,
+];
+
 const GENERIC = {
   inaccuracy: 'Der Zug ist spielbar, gibt aber einen Teil des Vorteils aus der Hand.',
   mistake: 'Das verschlechtert die Stellung deutlich.',
@@ -433,9 +492,9 @@ export function explainMove(ctx, k) {
     const praise = BEST_PRAISE[k % BEST_PRAISE.length];
     paragraphs.push(does ? `${does}. ${praise}` : praise);
   } else if (cls === 'excellent') {
-    paragraphs.push((does ? `${does}. ` : '') + (bestSan ? `Fast genauso stark wie der beste Zug **${bestSan}**.` : 'Ein sehr starker Zug.'));
+    paragraphs.push((does ? `${does}. ` : '') + (bestSan ? EXCELLENT[k % EXCELLENT.length](bestSan) : 'Ein sehr starker Zug.'));
   } else if (cls === 'good') {
-    paragraphs.push((does ? `${does}. ` : '') + (bestSan ? `Ein ordentlicher Zug – **${bestSan}** war aber noch etwas genauer.` : 'Ein ordentlicher Zug.'));
+    paragraphs.push((does ? `${does}. ` : '') + (bestSan ? GOOD[k % GOOD.length](bestSan) : 'Ein ordentlicher Zug.'));
   } else if (BAD.has(cls)) {
     const { refute, missed } = diagnose(ctx, k);
     const reasons = [];

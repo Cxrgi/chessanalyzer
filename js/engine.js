@@ -208,6 +208,7 @@ export class LiveEngine {
     this.token = 0;
     this.busy = false;
     this.pending = null;
+    this.multipv = 3;
   }
 
   async ensure() {
@@ -244,6 +245,7 @@ export class LiveEngine {
       while (this.pending) {
         const job = this.pending;
         this.pending = null;
+        this.uci.send(`setoption name MultiPV value ${Math.max(1, this.multipv)}`);
         const lines = await search(this.uci, job.fen, {
           depth: job.depth,
           onUpdate: (l) => {

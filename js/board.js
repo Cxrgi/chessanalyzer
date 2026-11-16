@@ -44,6 +44,7 @@ export class Board {
     root.addEventListener('pointerup', (e) => this.onPointerUp(e));
     root.addEventListener('pointercancel', () => { this.paint = null; this.cancelDrag(); });
     root.addEventListener('contextmenu', (e) => e.preventDefault());
+    this.user = { marks: new Set(), arrows: new Set() }; // eigene Markierungen per Rechtsklick
   }
 
   // -- Geometrie -------------------------------------------------------------
@@ -126,6 +127,11 @@ export class Board {
   setPosition(fen, { animate = true } = {}) {
     this.cancelDrag();
     this.clearSelection();
+    if (fen !== this.fen && (this.user.marks.size || this.user.arrows.size)) {
+      this.user.marks.clear();
+      this.user.arrows.clear();
+    }
+    this.fen = fen;
     const next = Board.parseFen(fen);
     const removed = [];
     const added = [];
@@ -190,6 +196,10 @@ export class Board {
   setDecor(d = {}) {
     this.decor = d;
     let marks = '';
+    for (const sq of this.user.marks) {
+      const [x, y] = this.xy(sq);
+      marks += `<div class="mark user" style="left:${x * 12.5}%;top:${y * 12.5}%"></div>`;
+    }
     for (const m of d.squares || []) {
       const [x, y] = this.xy(m.square);
       marks += `<div class="mark" style="left:${x * 12.5}%;top:${y * 12.5}%;background:${m.color}"></div>`;
@@ -197,7 +207,8 @@ export class Board {
     this.marksEl.innerHTML = marks;
 
     let arrows = '';
-    for (const a of d.arrows || []) {
+    const userArrows = [...this.user.arrows].map((u) => ({ from: u.slice(0, 2), to: u.slice(2, 4), color: '#f7a531', opacity: 0.9 }));
+    for (const a of [...(d.arrows || []), ...userArrows]) {
       const [x1, y1] = this.xy(a.from).map((v) => v + 0.5);
       const [x2, y2] = this.xy(a.to).map((v) => v + 0.5);
       const len = Math.hypot(x2 - x1, y2 - y1);
@@ -338,7 +349,34 @@ export class Board {
     this.root.classList.toggle('picking', !!fn);
   }
 
+  /** Rechte Maustaste: Feld markieren (Klick) oder Pfeil zeichnen (Ziehen). Linksklick räumt alles ab. */
+  rightDown(e) {
+    const sq = this.squareAt(e.clientX, e.clientY);
+    if (sq) this.rightFrom = sq;
+  }
+
+  rightUp(e) {
+    const from = this.rightFrom;
+    this.rightFrom = null;
+    const to = this.squareAt(e.clientX, e.clientY);
+    if (!from || !to) return;
+    const set = from === to ? this.user.marks : this.user.arrows;
+    const key = from === to ? from : from + to;
+    if (set.has(key)) set.delete(key);
+    else set.add(key);
+    this.setDecor(this.decor);
+  }
+
   onPointerDown(e) {
+    if (e.button === 2) {
+      this.rightDown(e);
+      return;
+    }
+    if (e.button === 0 && (this.user.marks.size || this.user.arrows.size)) {
+      this.user.marks.clear();
+      this.user.arrows.clear();
+      this.setDecor(this.decor);
+    }
     if (this.picker) {
       const sq = e.button > 0 ? null : this.squareAt(e.clientX, e.clientY);
       if (sq) this.picker(sq);
@@ -386,6 +424,10 @@ export class Board {
   }
 
   onPointerUp(e) {
+    if (e.button === 2) {
+      this.rightUp(e);
+      return;
+    }
     if (this.paint) {
       this.paint = null;
       return;

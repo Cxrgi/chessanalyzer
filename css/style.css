@@ -585,3 +585,58 @@ label.ed-label { margin-bottom: -6px; }
   .piece, .evalbar-white, .progress-fill { transition: none; }
   .board-badge { animation: none; }
 }
+
+/* ---- Werkzeuge über der Zugliste ---------------------------------------- */
+.mv-tools { display: flex; flex-wrap: wrap; gap: 6px; flex: none; }
+.mv-tools .chip { padding: 3px 10px; font-size: .8rem; }
+.mv-note { margin: 0; font-size: .88rem; color: var(--text); background: var(--bg-2); border: 1px solid var(--line); border-radius: 9px; padding: 6px 10px; flex: none; }
+.moves.only-bad .move-row:not(.has-bad) { display: none; }
+.moves.only-bad .mv:not(.bad) { opacity: .45; }
+.graph-wrap { position: relative; }
+.graph-tip { position: absolute; top: 3px; pointer-events: none; background: rgba(17, 21, 27, .92); color: #fff; font-size: .74rem; font-weight: 600; padding: 1px 7px; border-radius: 6px; white-space: nowrap; }
+.mark.user { background: rgba(247, 165, 49, .62); }
+
+/* ---- Einstellungen: weitere Optionen ------------------------------------ */
+.dialog { max-height: calc(100vh - 24px); overflow: auto; }
+.seg.n2 { grid-template-columns: repeat(2, 1fr); }
+.seg.n5 { grid-template-columns: repeat(5, 1fr); }
+.seg button { font-size: .88rem; }
+#set-more .toggle { display: flex; align-items: center; gap: 9px; padding: 5px 0; font-size: .93rem; }
+#set-more .toggle.range { justify-content: space-between; }
+#set-more input[type="range"] { flex: 1; max-width: 240px; accent-color: var(--accent); }
+#set-more input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
+#btn-keys { margin-top: 14px; }
+.keys-body { padding: 14px 18px 18px; }
+.keys { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: .92rem; }
+.keys td { padding: 6px 4px; border-top: 1px solid var(--line); vertical-align: top; }
+.keys td:first-child { white-space: nowrap; color: var(--muted); padding-right: 14px; }
+kbd { font: inherit; font-size: .8rem; font-weight: 700; background: var(--bg-2); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; padding: 1px 6px; color: var(--text); }
+
+/* ---- Brett: Größe, Animation, Zugpunkte --------------------------------- */
+@media (min-width: 981px) {
+  :root[data-size="small"] .review { --board: calc(min(calc(100vh - var(--header) - 132px), calc(100vw - 480px - var(--bar) - 64px)) * .7); }
+  :root[data-size="medium"] .review { --board: calc(min(calc(100vh - var(--header) - 132px), calc(100vw - 480px - var(--bar) - 64px)) * .85); }
+}
+.no-motion .board *, .no-motion .evalbar * { transition: none !important; animation: none !important; }
+.no-dots .sq-hint::after { display: none; }
+
+/* ---- Helles Design ------------------------------------------------------ */
+:root[data-mode="light"] {
+  --bg: #eef1f5; --bg-2: #f7f9fb; --panel: #ffffff; --panel-2: #e8edf3; --line: #cdd5df;
+  --text: #1a2230; --muted: #566275; --accent: #17875a; --accent-ink: #ffffff; --warn: #b85c00; --danger: #c93a2a;
+  color-scheme: light;
+}
+:root[data-mode="light"] body { background: radial-gradient(1200px 600px at 80% -10%, rgba(23, 135, 90, .10), transparent 60%), radial-gradient(900px 500px at -10% 110%, rgba(92, 139, 176, .14), transparent 60%), var(--bg); }
+:root[data-mode="light"] .topbar { background: rgba(255, 255, 255, .82); border-bottom-color: rgba(0, 0, 0, .08); }
+:root[data-mode="light"] .btn.soft:hover, :root[data-mode="light"] .ctl:hover { background: #dbe2ea; }
+:root[data-mode="light"] .btn.primary { box-shadow: 0 3px 0 #0f6844; }
+:root[data-mode="light"] .features article { background: rgba(255, 255, 255, .7); }
+:root[data-mode="light"] .tile.big { background: linear-gradient(140deg, #e3f3ec, var(--panel) 70%); }
+:root[data-mode="light"] .move-row:nth-child(odd) { background: rgba(0, 0, 0, .03); }
+:root[data-mode="light"] .mv:hover { background: rgba(0, 0, 0, .06); }
+:root[data-mode="light"] .game-list li + li, :root[data-mode="light"] .pf-table td { border-top-color: rgba(0, 0, 0, .07); }
+:root[data-mode="light"] .spinner { border-color: rgba(0, 0, 0, .15); border-top-color: var(--accent); }
+:root[data-mode="light"] .captured i { filter: drop-shadow(0 0 1px rgba(0, 0, 0, .45)); }
+:root[data-mode="light"] .coach-bubble, :root[data-mode="light"] .acc.w { box-shadow: inset 0 0 0 1px var(--line); }
+:root[data-mode="light"] .foot, :root[data-mode="light"] .stat small, :root[data-mode="light"] .badge, :root[data-mode="light"] .level small, :root[data-mode="light"] .move-num, :root[data-mode="light"] .mv .clk { color: #6a7688; }
+:root[data-mode="light"] .chip.on { background: rgba(23, 135, 90, .14); }
