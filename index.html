@@ -38,6 +38,8 @@
       <button type="button" class="tile big" data-go="analyse"><span class="tile-ico" data-ico="search"></span><b>Partie analysieren</b><small>Link einer chess.com-Partie einfügen – der Coach erklärt jeden Zug.</small></button>
       <button type="button" class="tile big" data-go="lektionen"><span class="tile-ico" data-ico="book"></span><b>Lektionen</b><small>Schach lernen – von den Regeln bis zum Endspiel.</small><span class="tile-prog" id="tile-prog"></span></button>
       <button type="button" class="tile big" data-go="aufgaben"><span class="tile-ico" data-ico="bulb"></span><b>Taktikaufgaben</b><small>Tausende Aufgaben, passend zu deiner Spielstärke.</small><span class="tile-prog" id="tile-puzzles"></span></button>
+      <button type="button" class="tile" data-go="training"><span class="tile-ico" data-ico="retry"></span><b>Fehler-Training</b><small>Deine eigenen Patzer als Aufgaben – bis sie sitzen.</small><span class="tile-prog" id="tile-training"></span></button>
+      <button type="button" class="tile" data-go="profil"><span class="tile-ico" data-ico="chart"></span><b>Mein Profil</b><small>Fortschritt, Schwächen und Statistik.</small><span class="tile-prog" id="tile-profile"></span></button>
       <button type="button" class="tile" data-go="spielen"><span class="tile-ico" data-ico="user"></span><b>Gegen den Computer</b><small>Acht Stärkestufen, Zug zurücknehmen, Tipp – danach direkt analysieren.</small></button>
       <button type="button" class="tile" data-go="brett"><span class="tile-ico" data-ico="grid"></span><b>Analysebrett</b><small>Frei für beide Seiten ziehen, die Engine zeigt den besten Zug.</small></button>
       <button type="button" class="tile" data-go="editor"><span class="tile-ico" data-ico="edit"></span><b>Stellung aufbauen</b><small>Eigene Position festlegen und von dort aus spielen.</small></button>
@@ -86,6 +88,16 @@
       <header><h2 id="games-title">Letzte Partien</h2><button class="icon-btn" id="games-close" aria-label="Schließen"></button></header>
       <ul class="game-list" id="games-list"></ul>
     </section>
+  </main>
+
+  <!-- Profil ------------------------------------------------------------------>
+  <main id="profile" class="profile" hidden>
+    <header class="hub-head">
+      <p class="eyebrow">Mein Profil</p>
+      <h1>Dein Fortschritt auf einen Blick.</h1>
+    </header>
+    <div id="profile-body" class="profile-body"></div>
+    <input type="file" id="import-file" accept="application/json,.json" hidden>
   </main>
 
   <!-- Lektionen --------------------------------------------------------------->
@@ -178,6 +190,21 @@
           <button type="button" class="btn soft" id="ls-next">Weiter</button>
         </div>
         <button type="button" class="link ls-all" id="ls-all">Alle Lektionen</button>
+      </section>
+
+      <!-- Fehler-Training -->
+      <section class="pane" id="pane-training" hidden>
+        <div class="pz-stats">
+          <div><b id="tr-left">0</b><span>noch offen</span></div>
+          <div><b id="tr-done">0</b><span>geübt</span></div>
+          <div><b id="tr-right">0</b><span>auf Anhieb</span></div>
+        </div>
+        <p class="hint" id="tr-label"></p>
+        <div class="tr-box" id="tr-box" title="Wiederholungsstufe"></div>
+        <div class="play-actions">
+          <button type="button" class="btn soft small" id="tr-open">Partie öffnen</button>
+          <button type="button" class="btn ghost small" id="tr-drop">Karte entfernen</button>
+        </div>
       </section>
 
       <!-- Gegen den Computer -->

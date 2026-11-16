@@ -33,6 +33,8 @@ const defaults = () => ({ rating: 1000, played: 0, solved: 0, streak: 0, best: 0
 const stats = () => ({ ...defaults(), ...d.store.get('puzzles', {}) });
 const save = (s) => d.store.set('puzzles', s);
 
+export const themeName = (t) => THEME[t] || t;
+
 /** Wertung und Zahl der gelösten Aufgaben für die Startseite. */
 export function puzzleSummary() {
   const s = stats();
@@ -250,6 +252,16 @@ function record(success) {
     s.streak = 0;
   }
   s.recent = [...s.recent, success ? 1 : 0].slice(-30);
+  // Erfolgsquote je Thema (für Profil und Seitenleiste)
+  s.themes = s.themes || {};
+  for (const t of P.puzzle.themes) {
+    if (!THEME[t] || ['opening', 'middlegame', 'endgame'].includes(t)) continue;
+    s.themes[t] = s.themes[t] || { n: 0, ok: 0 };
+    s.themes[t].n++;
+    if (success) s.themes[t].ok++;
+  }
+  s.curve = [...(s.curve || []), Math.round(s.rating)].slice(-60);
+  if (success && d.onSolved) d.onSolved();
   s.done = [...s.done, P.puzzle.id].slice(-6000);
   save(s);
 }

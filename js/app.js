@@ -1,7 +1,9 @@
 // Hauptlogik: Partie laden → analysieren → Übersicht → Zug für Zug mit Coach.
 import { Chess } from '../vendor/chess.js';
 import { openEditor, bindEditor } from './editor.js';
-import { initPuzzles, openPuzzles, puzzleTargets, puzzleMove, puzzleKey, puzzleSummary, leavePuzzles } from './puzzles.js';
+import { initPuzzles, openPuzzles, puzzleTargets, puzzleMove, puzzleKey, puzzleSummary, leavePuzzles, themeName } from './puzzles.js';
+import { initTraining, openTraining, trainingTargets, trainingMove, trainingKey, trainingSummary, leaveTraining } from './training.js';
+import { initProfile, renderProfile, dayStreak, TAGS } from './profile.js';
 import { initPlay, openPlay, playTargets, playMove, leavePlay } from './play.js';
 import { initLessons, renderLessonList, openLesson, lessonTargets, lessonMove, lessonKey, lessonProgress } from './lessons.js';
 import { Board } from './board.js';
@@ -92,13 +94,18 @@ function init() {
   migrateLegacy().catch(() => {}).then(renderHistory);
   $('user-input').value = S.username;
   bindEditor({ board, $, setCoach, uiIcon, copyText, pieceSet: () => S.settings.pieces, onPlay: (fen) => openBoard(fen), onCancel: closeEditor });
-  initLessons({ board, $, setCoach, store, uiIcon, esc, playSound, enterLessonView });
-  initPuzzles({ board, $, setCoach, store, playSound, enterPuzzleView, openBoard: (fen, ucis) => openBoard(fen, ucis, 1) });
+  initLessons({ board, $, setCoach, store, uiIcon, esc, playSound, enterLessonView, onDone: () => bump('lessons') });
+  initPuzzles({ board, $, setCoach, store, playSound, enterPuzzleView, openBoard: (fen, ucis) => openBoard(fen, ucis, 1), onSolved: () => bump('puzzles') });
   initPlay({
     board, $, setCoach, store, uiIcon, playSound, enterPlayView, san: sanDe, username: () => S.username,
     evaluate: (fen) => live.evaluate(fen, 12),
     analyze: (pgn, you) => { const g = gameFromPgn(pgn); g.youHint = you; startGame(g); },
     onResult: (r) => bump(r.scenario ? 'endgames' : 'played', r),
+  });
+  initTraining({ board, $, setCoach, playSound, enterTrainingView: () => soloPane('pane-training', 'training', 'Fehler-Training'), san: sanDe, evaluate: (fen) => live.evaluate(fen, 13), onCard: () => bump('cards') });
+  initProfile({
+    $, esc, store, lessonProgress, username: () => S.username, batchAnalyze, download, themeName,
+    openTheme: (theme) => { store.set('puzzles', { ...store.get('puzzles', {}), theme }); location.hash = '#aufgaben'; },
   });
   initAccount();
   routeFromHash();
@@ -297,6 +304,10 @@ function bindEvents() {
       if (puzzleKey(e.key)) e.preventDefault();
       return;
     }
+    if (S.view === 'training') {
+      if (trainingKey(e.key)) e.preventDefault();
+      return;
+    }
     if (S.view !== 'moves' && S.view !== 'overview') return;
     if (e.key === 'ArrowRight') {
       if (S.view === 'overview') { showMoves(); go(0); } else next();
@@ -467,16 +478,17 @@ async function renderHistory() {
 }
 
 /** Speichert Partie, Engine-Ergebnisse und Kurzfassung – und legt Trainingskarten für eigene Fehler an. */
-async function saveGame(game, positions, depth) {
+async function saveGame(c, positions, depth) {
+  const game = c.game;
   const slim = positions.map((p) => ({ lines: p.lines.map((l) => ({ ...l, pv: l.pv.slice(0, 12) })), eval: p.eval, terminal: p.terminal, book: p.book }));
   const old = await db.get('meta', game.id).catch(() => null);
-  const summary = { ...gameSummary(ctx()), fav: old ? old.fav : false, at: old ? old.at : Date.now() };
+  const summary = { ...gameSummary(c), fav: old ? old.fav : false, at: old ? old.at : Date.now() };
   await db.set('games', game.id, { game, positions: slim, depth, at: summary.at });
   await db.set('meta', game.id, summary);
-  if (S.you) {
-    const known = new Set((await db.all('cards')).map((c) => c.key));
-    const fresh = mistakeCards(ctx(), S.you).filter((c) => !known.has(c.id));
-    if (fresh.length) await db.setMany('cards', fresh.map((c) => [c.id, c]));
+  if (c.you) {
+    const known = new Set((await db.all('cards')).map((x) => x.key));
+    const fresh = mistakeCards(c, c.you).filter((x) => !known.has(x.id));
+    if (fresh.length) await db.setMany('cards', fresh.map((x) => [x.id, x]));
   }
 }
 
@@ -492,6 +504,20 @@ async function routeFromHash() {
   }
   if (id === 'lektionen') {
     showLessons();
+    return;
+  }
+  if (id === 'training') {
+    leaveModes();
+    openTraining();
+    return;
+  }
+  if (id === 'profil') {
+    leaveModes();
+    S.view = 'profile';
+    showMain('profile');
+    document.title = 'Mein Profil · Chess Analyzer';
+    renderProfile();
+    window.scrollTo(0, 0);
     return;
   }
   if (id === 'spielen') {
@@ -545,7 +571,7 @@ function keepAwake() {
 
 /** Zeigt genau einen Hauptbereich: hub | home | lessons | review. */
 function showMain(name) {
-  for (const id of ['hub', 'home', 'lessons', 'review']) $(id).hidden = id !== name;
+  for (const id of ['hub', 'home', 'lessons', 'profile', 'review']) $(id).hidden = id !== name;
   $('btn-new').hidden = name === 'hub';
 }
 
@@ -561,10 +587,11 @@ function leaveModes() {
   board.setInteractive(false);
   document.querySelector('.panel').classList.remove('is-editor');
   $('review').classList.remove('lesson-mode');
-  for (const id of ['pane-editor', 'pane-lesson', 'pane-puzzle', 'pane-play']) $(id).hidden = true;
+  for (const id of ['pane-editor', 'pane-lesson', 'pane-puzzle', 'pane-play', 'pane-training']) $(id).hidden = true;
   $('coach').hidden = false;
   leavePuzzles();
   leavePlay();
+  leaveTraining();
   S.game = S.review = S.variation = S.retry = null;
 }
 
@@ -586,6 +613,12 @@ function renderHub() {
   $('tile-prog').innerHTML = `<span>${done} von ${total} geschafft</span><div class="bar"><i style="width:${(done / total) * 100}%"></i></div>`;
   const pz = puzzleSummary();
   $('tile-puzzles').innerHTML = `<span>Wertung ${pz.rating} · ${pz.solved} gelöst</span>`;
+  trainingSummary().then((t) => {
+    $('tile-training').innerHTML = t.total ? `<span>${t.due} fällig · ${t.total} Karten</span>` : '<span>Füllt sich mit deinen Partien</span>';
+  });
+  const act = store.get('activity', {});
+  const today = act[new Date().toISOString().slice(0, 10)] || {};
+  $('tile-profile').innerHTML = `<span>${dayStreak(act)} Tage in Folge · heute ${today.puzzles || 0} Aufgaben</span>`;
   const cont = $('hub-continue');
   cont.hidden = !next || done === 0;
   if (next) cont.innerHTML = `<div><span>Weiter lernen</span><b>${esc(next.title)}</b></div>${uiIcon('arrow', 22)}`;
@@ -632,7 +665,7 @@ function soloPane(id, mode, title) {
   S.view = mode;
   showMain('review');
   $('review').classList.add('lesson-mode');
-  for (const p of ['pane-progress', 'pane-overview', 'pane-moves', 'pane-editor', 'pane-lesson', 'pane-puzzle', 'pane-play']) $(p).hidden = p !== id;
+  for (const p of ['pane-progress', 'pane-overview', 'pane-moves', 'pane-editor', 'pane-lesson', 'pane-puzzle', 'pane-play', 'pane-training']) $(p).hidden = p !== id;
   $('controls').hidden = true;
   document.title = `${title} · Chess Analyzer`;
   window.scrollTo(0, 0);
@@ -640,6 +673,17 @@ function soloPane(id, mode, title) {
 
 function enterPlayView() {
   soloPane('pane-play', 'play', 'Gegen den Computer');
+}
+
+/** Lädt eine Datei im Browser herunter. */
+function download(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 }
 
 /** Zählt Aktivität für Tagesziel und Statistik (pro Kalendertag). */
@@ -706,6 +750,61 @@ async function initAccount() {
 // Analyse
 // ---------------------------------------------------------------------------
 
+/**
+ * Rechnet alle Stellungen einer Partie durch – ohne Buchzüge und ohne Stellungen, die schon im Speicher liegen.
+ */
+async function runEngine(game, book, depth, pool, onProgress) {
+  const known = {};
+  // 1) Buchzüge brauchen keine Engine: Stellungen vor dem letzten Theoriezug überspringen
+  const nBook = bookMoves(game, book);
+  for (let i = 0; i < nBook; i++) known[i] = { lines: [], eval: { type: 'cp', value: 20 }, book: true };
+  // 2) Stellungen, die schon einmal in dieser Tiefe gerechnet wurden, aus dem Speicher holen
+  const keyOf = (fen) => `${fen.split(' ').slice(0, 4).join(' ')}|${depth}`;
+  const hits = await db.getMany('evals', game.fens.map(keyOf)).catch(() => new Map());
+  game.fens.forEach((fen, i) => {
+    if (!known[i] && hits.has(keyOf(fen))) known[i] = hits.get(keyOf(fen));
+  });
+  const positions = await pool.analyze(game.fens, { depth, known, onProgress });
+  const fresh = [];
+  positions.forEach((p, i) => {
+    if (p.fresh) fresh.push([keyOf(game.fens[i]), { lines: p.lines.map((l) => ({ ...l, pv: l.pv.slice(0, 12) })), eval: p.eval }]);
+  });
+  db.setMany('evals', fresh).catch(() => {});
+  return positions;
+}
+
+/** Analysiert die letzten Partien des Nutzers nacheinander im Hintergrund (für das Schwächenprofil). */
+async function batchAnalyze(n, report) {
+  const archive = await fetchRecentGames(S.username, { months: 4 });
+  const book = await loadBook();
+  const me = S.username.toLowerCase();
+  const list = [];
+  for (const a of archive) {
+    if (list.length >= n) break;
+    try {
+      const game = gameFromArchive(a);
+      if (!(await db.get('meta', game.id))) list.push(game);
+    } catch (e) { /* Varianten überspringen */ }
+  }
+  if (!list.length) {
+    report(1, 1, 'Deine letzten Partien sind schon alle analysiert.');
+    return;
+  }
+  let done = 0;
+  for (const game of list) {
+    if (!report(done, list.length, `Partie ${done + 1} von ${list.length}: ${game.white.name} – ${game.black.name}`)) break;
+    const depth = S.settings.depth;
+    const positions = await runEngine(game, book, depth, new AnalysisPool(), null);
+    if (game.drawn) positions[positions.length - 1] = { lines: [], eval: { type: 'cp', value: 0 }, terminal: 'draw' };
+    const review = reviewGame(game, positions, book);
+    const you = game.white.name.toLowerCase() === me ? 'w' : game.black.name.toLowerCase() === me ? 'b' : null;
+    await saveGame({ game, positions: review.positions, review, you }, positions, depth);
+    bump('games');
+    done++;
+  }
+  report(done, list.length, `${done} Partien analysiert.`);
+}
+
 async function loadBook() {
   if (!S.book) {
     try {
@@ -762,34 +861,19 @@ async function startGame(game, cached) {
   if (cached && cached.positions.length === game.fens.length && (cached.depth || 0) >= S.settings.depth) {
     positions = cached.positions;
   } else {
-    const depth = S.settings.depth;
-    const known = {};
-    // 1) Buchzüge brauchen keine Engine: Stellungen vor dem letzten Theoriezug überspringen
-    const nBook = bookMoves(game, book);
-    for (let i = 0; i < nBook; i++) known[i] = { lines: [], eval: { type: 'cp', value: 20 }, book: true };
-    // 2) Stellungen, die schon einmal in dieser Tiefe gerechnet wurden, aus dem Speicher holen
-    const keyOf = (fen) => `${fen.split(' ').slice(0, 4).join(' ')}|${depth}`;
-    const hits = await db.getMany('evals', game.fens.map(keyOf)).catch(() => new Map());
-    game.fens.forEach((fen, i) => {
-      if (!known[i] && hits.has(keyOf(fen))) known[i] = hits.get(keyOf(fen));
-    });
     const pool = new AnalysisPool();
     S.pool = pool;
     let shown = 0;
     const wake = keepAwake();
     try {
-      positions = await pool.analyze(game.fens, {
-        depth,
-        known,
-        onProgress: (done, total, index) => {
-          if (S.pool !== pool) return;
-          $('progress-fill').style.width = `${(done / total) * 100}%`;
-          $('progress-label').textContent = `Analysiere Stellung ${done} von ${total} …`;
-          if (index > shown) {
-            shown = index;
-            board.setPosition(game.fens[index]);
-          }
-        },
+      positions = await runEngine(game, book, S.settings.depth, pool, (done, total, index) => {
+        if (S.pool !== pool) return;
+        $('progress-fill').style.width = `${(done / total) * 100}%`;
+        $('progress-label').textContent = `Analysiere Stellung ${done} von ${total} …`;
+        if (index > shown) {
+          shown = index;
+          board.setPosition(game.fens[index]);
+        }
       });
     } catch (e) {
       wake.release();
@@ -805,12 +889,8 @@ async function startGame(game, cached) {
     wake.release();
     if (S.pool !== pool) return;
     S.pool = null;
-    const fresh = [];
-    positions.forEach((p, i) => {
-      if (p.fresh) fresh.push([keyOf(game.fens[i]), { lines: p.lines.map((l) => ({ ...l, pv: l.pv.slice(0, 12) })), eval: p.eval }]);
-    });
-    db.setMany('evals', fresh).catch(() => {});
     cached = null;
+    bump('games');
     if (document.hidden) playSound('end');
   }
   // Remis durch Stellungswiederholung oder 50-Züge-Regel: Die Schlussstellung ist remis, egal was die Engine meint
@@ -819,7 +899,7 @@ async function startGame(game, cached) {
   S.review = reviewGame(game, positions, book);
   buildMoveList();
   showOverview();
-  saveGame(game, positions, (cached && cached.depth) || S.settings.depth).catch((e) => console.error(e));
+  saveGame(ctx(), positions, (cached && cached.depth) || S.settings.depth).catch((e) => console.error(e));
 }
 
 async function loadAvatars(game) {
@@ -882,7 +962,7 @@ function setYou(color) {
   board.setOrientation(color);
   S.review.diag = null;
   showOverview();
-  db.get('games', S.game.id).then((g) => g && saveGame(S.game, g.positions, g.depth)).catch(() => {});
+  db.get('games', S.game.id).then((g) => g && saveGame(ctx(), g.positions, g.depth)).catch(() => {});
 }
 
 function showMoves() {
@@ -1061,6 +1141,7 @@ function legalTargets(square) {
   if (S.mode === 'lesson') return lessonTargets(square);
   if (S.mode === 'puzzle') return puzzleTargets(square);
   if (S.mode === 'play') return playTargets(square);
+  if (S.mode === 'training') return trainingTargets(square);
   if (S.view !== 'moves') return [];
   if (S.retry && S.retry.state !== 'waiting') return [];
   const chess = new Chess(currentFen());
@@ -1087,6 +1168,10 @@ function onUserMove({ from, to, promotion }) {
   }
   if (S.mode === 'play') {
     playMove({ from, to, promotion });
+    return;
+  }
+  if (S.mode === 'training') {
+    trainingMove({ from, to, promotion });
     return;
   }
   const fen = currentFen();

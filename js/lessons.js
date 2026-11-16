@@ -303,6 +303,7 @@ function nextStep(skip) {
 
 function finish() {
   const done = doneMap();
+  if (!done[L.lesson.id] && d.onDone) d.onDone();
   done[L.lesson.id] = true;
   d.store.set('lessons', done);
   L.finished = true;
