@@ -18,6 +18,18 @@ export const CLASSES = {
   blunder: { label: 'Patzer', noun: 'ein Patzer', symbol: '??', color: '#fa412d' },
 };
 
+const NORMAL_COLORS = Object.fromEntries(Object.entries(CLASSES).map(([k, v]) => [k, v.color]));
+// Farben, die sich auch bei Rot-Grün-Schwäche gut unterscheiden lassen (Okabe-Ito-Palette)
+const SAFE_COLORS = { brilliant: '#0072b2', great: '#56b4e9', best: '#009e73', excellent: '#009e73', good: '#5f8f7b', book: '#a88865', forced: '#8b8987', inaccuracy: '#d4c21a', mistake: '#e69f00', miss: '#cc79a7', blunder: '#d55e00' };
+
+/** Schaltet zwischen normaler und farbenblind-freundlicher Palette um. */
+export function setPalette(safe) {
+  for (const k of Object.keys(CLASSES)) CLASSES[k].color = (safe ? SAFE_COLORS : NORMAL_COLORS)[k];
+}
+
+/** Wie streng Züge bewertet werden: Faktor auf die Schwellen (mild = großzügiger). */
+export const STRICTNESS = { mild: 1.5, normal: 1, strict: 0.75 };
+
 export const CLASS_ORDER = ['brilliant', 'great', 'best', 'excellent', 'good', 'book', 'inaccuracy', 'mistake', 'miss', 'blunder'];
 export const BAD = new Set(['inaccuracy', 'mistake', 'miss', 'blunder']);
 
@@ -90,12 +102,20 @@ function sacrificeValue(fenAfter, move) {
   return offered - got;
 }
 
+/** Anzahl der Züge vom Partiebeginn an, die im Eröffnungsbuch stehen. */
+export function bookMoves(game, book) {
+  if (!book || !game.startFen.startsWith('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq')) return 0;
+  let k = 0;
+  while (k < game.moves.length && k < 40 && book.book[positionKey(game.fens[k + 1])] !== undefined) k++;
+  return k;
+}
+
 /**
  * @param game       Partie (moves, fens)
  * @param positions  Engine-Ergebnis je Stellung: { lines: [{move, pv, eval}], eval }
  * @param book       Eröffnungsbuch { names, book }
  */
-export function reviewGame(game, positions, book) {
+export function reviewGame(game, positions, book, scale = 1) {
   const n = game.moves.length;
   // Rückwärts abgleichen: Die Stellung nach einem Zug wurde einen Halbzug tiefer gerechnet
   // und ist damit verlässlicher als die Vorschau aus der Stellung davor.
@@ -166,10 +186,10 @@ export function reviewGame(game, positions, book) {
     if (!cls) {
       if (legal === 1) cls = 'forced';
       else if (isBest) cls = 'best';
-      else if (loss <= 2) cls = 'excellent';
-      else if (loss <= 5) cls = 'good';
-      else if (loss <= 10) cls = 'inaccuracy';
-      else if (loss <= 20) cls = 'mistake';
+      else if (loss <= 2 * scale) cls = 'excellent';
+      else if (loss <= 5 * scale) cls = 'good';
+      else if (loss <= 10 * scale) cls = 'inaccuracy';
+      else if (loss <= 20 * scale) cls = 'mistake';
       else cls = 'blunder';
 
       // Verpasste Chance: Der Gegner hat gepatzt, aber die Gelegenheit wurde nicht genutzt

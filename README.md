@@ -16,7 +16,22 @@ Nicht mit Chess.com verbunden. Die komplette Analyse läuft im Browser auf deine
 - **Lektionen**: 53 kurze, interaktive Lektionen in neun Kursen – Grundlagen, Taktik, Mattbilder, Eröffnung, Endspiel,
   Sicher spielen, Taktik für Fortgeschrittene, Strategie und Königsangriff – mit Aufgaben direkt auf dem Brett,
   Tipps, Lösungen und gespeichertem Fortschritt
-- **Partie laden** über einen chess.com-Link, über deinen Benutzernamen (Liste der letzten Partien) oder per PGN
+- **Partie laden** über einen chess.com- oder Lichess-Link, über deinen Benutzernamen (Liste der letzten Partien
+  mit Filtern), per PGN-Text oder PGN-Datei (auch per Drag & Drop, auch mit mehreren Partien)
+- **Gegen den Computer spielen** in acht Stärkestufen (Zug zurück, Tipp, danach direkt analysieren) und
+  **Endspiel-Trainer** mit den wichtigsten Mattführungen und Turmendspielen
+- **Fehler-Training**: Fehler aus den eigenen Partien kommen als Aufgaben in wachsenden Abständen wieder, bis sie sitzen
+- **Trainer**: Eröffnungstrainer mit 36 Hauptvarianten und Koordinaten-Trainer
+- **Mein Profil**: Genauigkeit im Verlauf, häufigste Fehlerarten mit passender Lektion und Aufgaben, Zeitmanagement,
+  Serien, Abzeichen, mehrere Partien am Stück analysieren, Sicherung als Datei (Export/Import)
+- **Taktik-Extras**: Tagesaufgabe, „Sturm“ auf Zeit, Tipp in zwei Stufen, falsch gelöste Aufgaben kommen wieder,
+  Statistik je Thema
+- **Exportieren und teilen**: kommentierte PGN (mit Bewertungen), Teilen-Link, Brett als Bild, Fazit als Text
+- **Werkzeuge in der Analyse**: „Nur Fehler“, „Drohung zeigen“, „Tiefer rechnen“, eigene Pfeile und Markierungen per
+  Rechtsklick, Mausrad zum Blättern, Tastenkürzel-Übersicht mit `?`
+- **Einstellungen**: helles oder dunkles Design, Brettgröße, Notation (deutsch, englisch, Figuren), Strenge der
+  Bewertung, Zahl der Engine-Linien, Farben für Farbenblinde, Lautstärke, Animationen
+- **Offline nutzbar** und als App installierbar (Service Worker); einmal geladene Dateien kommen aus dem Gerätespeicher
 - **Jeder Zug bewertet**: Brillant, Großartig, Bester Zug, Ausgezeichnet, Gut, Buchzug, Ungenauigkeit, Fehler, Verpasste Chance, Patzer
 - **Bewertungsleiste**, Genauigkeit für beide Seiten, Bewertungsdiagramm, Eröffnungsname
 - **Coach**, der in Sätzen erklärt, was ein Zug bewirkt, warum er schlecht war und was besser gewesen wäre –
@@ -42,6 +57,10 @@ Nicht mit Chess.com verbunden. Die komplette Analyse läuft im Browser auf deine
 - Geschützt sind Seite, Skripte, Daten und `/api/*`. Bilder, Stylesheet und die Engine-Dateien bleiben abrufbar.
 - Auf rein statischem Hosting (z. B. GitHub Pages) gibt es keinen Passwortschutz, weil dort kein Server-Code läuft.
 - Lokal ohne Passwort starten: `NO_PASSWORD=1 npm start`
+- Passwort ändern meldet alle anderen Geräte ab; in den Einstellungen gibt es außerdem „Auf allen anderen Geräten abmelden“.
+- Umgebungsvariable `SETUP_TOKEN`: Ist sie gesetzt, kann nur jemand mit diesem Code das erste Passwort festlegen.
+- Umgebungsvariable `REQUIRE_LOGIN=false` schaltet den Schutz ab (öffentliche Seite).
+- Beim Abmelden werden die offline gespeicherten Dateien vom Gerät gelöscht.
 
 ## Starten
 
@@ -65,12 +84,33 @@ Die Seite direkt per Doppelklick auf `index.html` zu öffnen funktioniert nicht 
 
 Hintergrund: chess.com erlaubt Browsern anderer Webseiten nicht, eine Partie direkt über ihre ID abzurufen.
 Deshalb holt eine winzige Server-Funktion (`server/proxy.mjs`) die Partie-Daten. Die öffentliche Archiv-Schnittstelle
-(`api.chess.com/pub`) funktioniert dagegen direkt aus dem Browser und dient als Ausweichweg. Auf rein statischem
-Hosting versucht die Seite zusätzlich öffentliche CORS-Proxys (allorigins, codetabs), bevor sie nach dem Benutzernamen fragt.
+(`api.chess.com/pub`) funktioniert dagegen direkt aus dem Browser und dient als Ausweichweg.
+
+### Sparsam mit dem Netlify-Kontingent
+
+- Die Seite hat keinen Build-Schritt; es wird nur veröffentlicht, wenn du es auslöst.
+- Analyse, Aufgaben, Lektionen und alle Statistiken laufen im Browser. Der Server wird nur für die Anmeldung und für das
+  Laden einer chess.com-Partie per Link gebraucht.
+- Der Service Worker (`sw.js`) liefert bereits geladene Dateien aus dem Gerätespeicher. **Bei jeder Veröffentlichung
+  `VERSION` in `sw.js` ändern**, damit alle Geräte die neuen Dateien holen (sonst dauert es bis zu einem Tag).
+- Bewusst nicht eingebaut, weil es laufend Kontingent kosten würde: Cloud-Synchronisierung, KI-Erklärungen,
+  Überwachung/Alarme und Zähler im Blob-Speicher.
+
+## Tests
+
+```bash
+npm test
+```
+
+Prüft alle Lektionen (jede Lösung muss ein legaler Zug sein) und die Kernfunktionen: Links erkennen, Züge dekodieren,
+PGN lesen und schreiben, Zugbewertung, Eröffnungslinien und den Passwortschutz. Dieselben Tests laufen bei jedem Push
+über GitHub Actions (`.github/workflows/ci.yml`).
 
 ## Grenzen
 
 - Nur normales Schach (kein Chess960 und keine anderen Varianten).
+- Alle Daten (Partien, Fortschritt, Einstellungen) liegen nur im Browser des jeweiligen Geräts. Zum Umziehen auf ein
+  anderes Gerät gibt es im Profil die Sicherung als Datei.
 - Die Lektionen sind eigene Inhalte zu den üblichen Themen eines Schachkurses – nicht die Lektionen von chess.com,
   denn deren Texte, Videos und Aufgaben sind urheberrechtlich geschützt.
 - Das Brett-Design, das du auf chess.com eingestellt hast, wird von chess.com nicht mitgeliefert – deshalb startet die Seite
@@ -95,7 +135,18 @@ js/editor.js          Stellungs-Editor für das Analysebrett
 js/lessons.js         Lektions-Übersicht und -Player
 js/lessons-data.js    Inhalte der Grundkurse (geprüft mit tools/check-lessons.mjs)
 js/lessons-more.js    Weiterführende Lektionen
-js/puzzles.js         Taktikaufgaben (Auswahl nach Wertung, Wertungsberechnung, Themenfilter)
+js/puzzles.js         Taktikaufgaben (Auswahl nach Wertung, Wertungsberechnung, Themenfilter, Sturm, Tagesaufgabe)
+js/play.js            Gegen den Computer spielen, Endspiel-Trainer
+js/training.js        Fehler-Training (Karteikasten-Prinzip)
+js/trainers.js        Koordinaten- und Eröffnungstrainer (Linien in js/openings-data.js)
+js/profile.js         Profil, Schwächenanalyse, Stapelanalyse, Sicherung
+js/insights.js        Zeitmanagement, Fehlerarten, Kurzfassung einer Partie
+js/pgn.js             PGN schreiben, Mehrfach-PGN, Teilen-Link
+js/lichess.js         Lichess-Partien laden
+js/db.js              Speicher im Browser (IndexedDB)
+sw.js                 Service Worker (offline, weniger Anfragen)
+manifest.webmanifest  App-Daten für „Zum Startbildschirm hinzufügen“
+tests/                Automatische Tests (node --test)
 data/puzzles/         Aufgaben nach Schwierigkeit (erzeugt mit tools/select-puzzles.py + tools/build-puzzles.mjs)
 server/gate.mjs       Passwortschutz (lokaler Server und Netlify Edge Function)
 data/openings.json    Eröffnungsbuch (erzeugt mit tools/build-openings.mjs)

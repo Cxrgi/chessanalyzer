@@ -1,16 +1,24 @@
 // Hauptlogik: Partie laden → analysieren → Übersicht → Zug für Zug mit Coach.
 import { Chess } from '../vendor/chess.js';
 import { openEditor, bindEditor } from './editor.js';
-import { initPuzzles, openPuzzles, puzzleTargets, puzzleMove, puzzleKey, puzzleSummary, leavePuzzles } from './puzzles.js';
+import { initPuzzles, openPuzzles, puzzleTargets, puzzleMove, puzzleKey, puzzleSummary, leavePuzzles, themeName } from './puzzles.js';
+import { initTraining, openTraining, trainingTargets, trainingMove, trainingKey, trainingSummary, leaveTraining } from './training.js';
+import { initProfile, renderProfile, dayStreak, TAGS } from './profile.js';
+import { initPlay, openPlay, playTargets, playMove, leavePlay } from './play.js';
+import { initTrainers, openTrainers, trainerTargets, trainerMove, trainerSummary, leaveTrainers } from './trainers.js';
 import { initLessons, renderLessonList, openLesson, lessonTargets, lessonMove, lessonKey, lessonProgress } from './lessons.js';
 import { Board } from './board.js';
-import { AnalysisPool, LiveEngine } from './engine.js';
-import { reviewGame, winPct, evalText, CLASSES, CLASS_ORDER, BAD } from './analysis.js';
-import { explainMove, summarize, resultText, describeMove, pvToMoves, lineText, sanDe, say } from './coach.js';
+import { AnalysisPool, LiveEngine, EnginePlayer, warmEngine } from './engine.js';
+import { db, migrateLegacy } from './db.js';
+import { parseLichessLink, loadLichessGame, fetchLichessGames } from './lichess.js';
+import { buildPgn, splitPgn, pgnTag, packPgn, unpackPgn } from './pgn.js';
+import { gameSummary, mistakeCards, mistakeTag, timeReport, timeSpent } from './insights.js';
+import { reviewGame, bookMoves, winPct, evalText, CLASSES, CLASS_ORDER, BAD, STRICTNESS, setPalette } from './analysis.js';
+import { explainMove, summarize, resultText, describeMove, pvToMoves, lineText, sanDe, say, setNotation } from './coach.js';
 import { parseGameLink, loadByLink, gameFromPgn, gameFromArchive, fetchRecentGames, fetchAvatar, LoadError } from './chesscom.js';
-import { materialInfo } from './tactics.js';
+import { materialInfo, flipTurn } from './tactics.js';
 import { classIcon, uiIcon } from './icons.js';
-import { playSound, setSoundEnabled } from './sound.js';
+import { playSound, setSoundEnabled, setVolume } from './sound.js';
 import { DEMO_PGN } from './demo.js';
 
 const $ = (id) => document.getElementById(id);
@@ -28,6 +36,17 @@ const THEMES = {
 };
 const PIECE_SETS = { cburnett: 'Klassisch', chessnut: 'Modern', merida: 'Merida' };
 const DEPTHS = { 12: 'Schnell', 16: 'Normal', 20: 'Tief' };
+// Weitere Einstellungen: [Schlüssel, Überschrift, Auswahl]
+const OPTIONS = [
+  ['mode', 'Design', { dark: 'Dunkel', light: 'Hell' }],
+  ['size', 'Brettgröße', { small: 'Klein', medium: 'Mittel', auto: 'Groß' }],
+  ['notation', 'Schreibweise der Züge', { de: 'Deutsch (S, L, T, D)', en: 'Englisch (N, B, R, Q)', fig: 'Figuren (♘ ♗ ♖ ♕)' }],
+  ['strict', 'Bewertung der Züge', { mild: 'Nachsichtig', normal: 'Normal', strict: 'Streng' }],
+  ['lines', 'Engine-Linien', { 0: 'Aus', 1: '1', 2: '2', 3: '3', 5: '5' }],
+  ['palette', 'Farben der Zugbewertung', { normal: 'Standard', safe: 'Für Farbenblinde' }],
+];
+const TOGGLES = [['anim', 'Figuren gleiten lassen'], ['dots', 'Mögliche Züge als Punkte zeigen'], ['lastMove', 'Letzten Zug farbig markieren']];
+const DEFAULTS = { theme: 'green', pieces: 'cburnett', depth: 16, sound: true, volume: 0.7, mode: 'dark', size: 'auto', notation: 'de', strict: 'normal', lines: 3, palette: 'normal', anim: true, dots: true, lastMove: true };
 
 // ---------------------------------------------------------------------------
 // Zustand & Speicher
@@ -56,8 +75,9 @@ const store = {
 };
 
 const S = {
-  settings: { theme: 'green', pieces: 'cburnett', depth: 16, sound: true, ...store.get('settings', {}) },
+  settings: { ...DEFAULTS, ...store.get('settings', {}) },
   username: store.get('username', ''),
+  site: store.get('site', 'chesscom'),
   view: 'home',
   mode: null, // 'game' = Partieanalyse, 'board' = freies Analysebrett
   game: null,
@@ -74,7 +94,9 @@ const S = {
 };
 
 const live = new LiveEngine();
+const scale = () => STRICTNESS[S.settings.strict] || 1;
 let board;
+let threatEngine = null;
 
 // ---------------------------------------------------------------------------
 // Start
@@ -86,14 +108,75 @@ function init() {
   buildStaticIcons();
   buildSettingsDialog();
   bindEvents();
-  renderHistory();
+  migrateLegacy().catch(() => {}).then(renderHistory);
   $('user-input').value = S.username;
   bindEditor({ board, $, setCoach, uiIcon, copyText, pieceSet: () => S.settings.pieces, onPlay: (fen) => openBoard(fen), onCancel: closeEditor });
-  initLessons({ board, $, setCoach, store, uiIcon, esc, playSound, enterLessonView });
-  initPuzzles({ board, $, setCoach, store, playSound, enterPuzzleView, openBoard: (fen, ucis) => openBoard(fen, ucis, 1) });
+  initLessons({ board, $, setCoach, store, uiIcon, esc, playSound, enterLessonView, onDone: () => bump('lessons') });
+  initPuzzles({ board, $, setCoach, store, playSound, enterPuzzleView, openBoard: (fen, ucis) => openBoard(fen, ucis, 1), onSolved: () => bump('puzzles') });
+  initPlay({
+    board, $, setCoach, store, uiIcon, playSound, enterPlayView, san: sanDe, username: () => S.username,
+    evaluate: (fen) => live.evaluate(fen, 12),
+    analyze: (pgn, you) => { const g = gameFromPgn(pgn); g.youHint = you; startGame(g); },
+    onResult: (r) => bump(r.scenario ? 'endgames' : 'played', r),
+  });
+  initTraining({ board, $, setCoach, playSound, enterTrainingView: () => soloPane('pane-training', 'training', 'Fehler-Training'), san: sanDe, evaluate: (fen) => live.evaluate(fen, 13), onCard: () => bump('cards') });
+  initTrainers({ board, $, setCoach, store, esc, playSound, san: sanDe, enterTrainerView: (title) => soloPane('pane-trainer', 'trainer', title), openBoard: (fen, ucis) => openBoard(fen, ucis), onDone: (kind) => bump(kind === 'coords' ? 'coords' : 'openings') });
+  initProfile({
+    $, esc, store, lessonProgress, username: () => S.username, batchAnalyze, download, themeName,
+    openTheme: (theme) => { store.set('puzzles', { ...store.get('puzzles', {}), theme }); location.hash = '#aufgaben'; },
+  });
   initAccount();
   routeFromHash();
   watchHostBadge();
+  initOffline();
+  bindSwipe();
+  $('skip-link').onclick = (e) => {
+    e.preventDefault();
+    const main = [...document.querySelectorAll('main')].find((m) => !m.hidden);
+    if (main) { main.tabIndex = -1; main.focus(); }
+  };
+}
+
+/**
+ * Offline-Modus: Ein Service Worker hält die Seite im Gerätespeicher. Das macht sie ohne Netz
+ * nutzbar und spart Anfragen an den Server. Nach einem Update lädt die Startseite einmal neu.
+ */
+function initOffline() {
+  if (!('serviceWorker' in navigator) || (location.protocol !== 'https:' && location.hostname !== 'localhost')) return;
+  const had = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!had || reloaded || S.view !== 'hub') return;
+    reloaded = true;
+    location.reload();
+  });
+}
+
+/** Entfernt Service Worker und Zwischenspeicher (beim Abmelden – danach liegt nichts mehr offline vor). */
+async function clearOffline() {
+  try {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(regs.map((r) => r.unregister()));
+    for (const key of await caches.keys()) await caches.delete(key);
+  } catch (e) { /* nicht unterstützt – dann gibt es auch nichts zu löschen */ }
+}
+
+/** Auf dem Handy: über Coach oder Zugliste wischen blättert einen Zug vor oder zurück. */
+function bindSwipe() {
+  let start = null;
+  const panel = document.querySelector('.panel');
+  panel.addEventListener('touchstart', (e) => {
+    const t = e.touches[0];
+    start = e.touches.length === 1 && !e.target.closest('input, select, textarea, .graph-wrap, .palette') ? { x: t.clientX, y: t.clientY, at: Date.now() } : null;
+  }, { passive: true });
+  panel.addEventListener('touchend', (e) => {
+    if (!start || S.view !== 'moves' || (S.mode !== 'game' && S.mode !== 'board')) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - start.x, dy = t.clientY - start.y;
+    if (Date.now() - start.at < 600 && Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 2) (dx < 0 ? next : prev)();
+    start = null;
+  }, { passive: true });
 }
 
 /**
@@ -135,6 +218,17 @@ function applySettings() {
   if (!PIECE_SETS[S.settings.pieces]) S.settings.pieces = 'cburnett';
   board.setPieceSet(S.settings.pieces);
   setSoundEnabled(S.settings.sound);
+  setVolume(+S.settings.volume);
+  setNotation(S.settings.notation);
+  setPalette(S.settings.palette === 'safe');
+  live.multipv = Math.max(1, +S.settings.lines || 1);
+  const root = document.documentElement;
+  root.dataset.mode = S.settings.mode === 'light' ? 'light' : 'dark';
+  root.dataset.size = S.settings.size;
+  root.classList.toggle('no-motion', !S.settings.anim);
+  root.classList.toggle('no-dots', !S.settings.dots);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = S.settings.mode === 'light' ? '#eef1f5' : '#11151b';
   $('btn-sound').innerHTML = uiIcon(S.settings.sound ? 'sound' : 'mute', 20);
   store.set('settings', S.settings);
   if (S.view !== 'home' && S.game) renderPlayers();
@@ -150,8 +244,25 @@ function buildSettingsDialog() {
         <i class="pc" style="background-image:url('assets/pieces/${k}/wN.svg')"></i>${name}</button>`).join('');
     $('set-depth').innerHTML = Object.entries(DEPTHS).map(([d, name]) =>
       `<button type="button" class="${+d === S.settings.depth ? 'on' : ''}" data-depth="${d}">${name}</button>`).join('');
+    $('set-more').innerHTML = OPTIONS.map(([key, title, choices]) =>
+      `<h3>${title}</h3><div class="seg n${Object.keys(choices).length}">` + Object.entries(choices).map(([v, name]) =>
+        `<button type="button" class="${String(S.settings[key]) === v ? 'on' : ''}" data-opt="${key}" data-value="${v}">${name}</button>`).join('') + '</div>').join('')
+      + '<h3>Brett und Ton</h3>'
+      + TOGGLES.map(([key, title]) => `<label class="toggle"><input type="checkbox" data-toggle="${key}" ${S.settings[key] ? 'checked' : ''}> ${title}</label>`).join('')
+      + `<label class="toggle range">Lautstärke <input type="range" id="set-volume" min="0" max="1" step="0.05" value="${S.settings.volume}"></label>`;
   };
   draw();
+  $('settings').addEventListener('change', (e) => {
+    const t = e.target;
+    if (t.dataset.toggle) S.settings[t.dataset.toggle] = t.checked;
+    else if (t.id === 'set-volume') {
+      S.settings.volume = +t.value;
+      S.settings.sound = S.settings.volume > 0;
+    } else return;
+    applySettings();
+    if (t.id === 'set-volume') playSound('move');
+    refreshAfterSettings();
+  });
   $('settings').addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (e.target === $('settings')) $('settings').close();
@@ -159,12 +270,30 @@ function buildSettingsDialog() {
     if (b.dataset.theme) S.settings.theme = b.dataset.theme;
     else if (b.dataset.pieces) S.settings.pieces = b.dataset.pieces;
     else if (b.dataset.depth) S.settings.depth = +b.dataset.depth;
+    else if (b.dataset.opt) S.settings[b.dataset.opt] = b.dataset.opt === 'lines' ? +b.dataset.value : b.dataset.value;
     else return;
     applySettings();
     draw();
+    refreshAfterSettings(b.dataset.opt);
   });
+  $('btn-keys').onclick = () => { $('settings').close(); $('keys').showModal(); };
+  $('keys-close').onclick = () => $('keys').close();
+  $('keys').addEventListener('click', (e) => { if (e.target === $('keys')) $('keys').close(); });
   $('btn-settings').onclick = () => $('settings').showModal();
   $('settings-close').onclick = () => $('settings').close();
+}
+
+/** Zeichnet neu, was von einer geänderten Einstellung abhängt (Notation, Strenge, Farben …). */
+function refreshAfterSettings(opt) {
+  if (S.mode !== 'game' || !S.review) {
+    if (S.mode === 'board' && S.variation) render();
+    return;
+  }
+  if (opt === 'strict') S.review = reviewGame(S.game, S.review.positions, S.book, scale());
+  buildMoveList();
+  if (S.view === 'overview') renderOverview();
+  else if (S.view === 'moves') render();
+  renderGraphs();
 }
 
 function bindEvents() {
@@ -198,13 +327,33 @@ function bindEvents() {
     showRecentGames(name);
   };
   $('games-close').onclick = () => { $('games-card').hidden = true; };
+  $('site-input').value = S.site;
+  $('site-input').onchange = (e) => {
+    S.site = e.target.value;
+    store.set('site', S.site);
+  };
+  $('btn-file').onclick = () => $('pgn-file').click();
+  $('pgn-file').onchange = (e) => {
+    openPgnFile(e.target.files[0]);
+    e.target.value = '';
+  };
+  const card = $('load-form');
+  for (const ev of ['dragenter', 'dragover']) card.addEventListener(ev, (e) => { e.preventDefault(); card.classList.add('drop'); });
+  for (const ev of ['dragleave', 'drop']) card.addEventListener(ev, (e) => { e.preventDefault(); card.classList.remove('drop'); });
+  card.addEventListener('drop', (e) => openPgnFile(e.dataTransfer.files[0]));
+  $('games-filter').addEventListener('click', (e) => {
+    const c = e.target.closest('.chip');
+    if (!c) return;
+    S.gamesList.filter[c.dataset.key] = c.dataset.value;
+    renderGamesList();
+  });
   $('btn-new').onclick = goHome;
   $('btn-board').onclick = () => openBoard(S.mode === 'game' && S.view === 'moves' ? currentFen() : null);
   document.querySelector('.tiles').addEventListener('click', (e) => {
     const t = e.target.closest('.tile');
     if (!t) return;
     const go = t.dataset.go;
-    if (go === 'analyse' || go === 'lektionen' || go === 'brett' || go === 'aufgaben') location.hash = '#' + go;
+    if (['analyse', 'lektionen', 'brett', 'aufgaben', 'spielen', 'training', 'profil', 'trainer'].includes(go)) location.hash = '#' + go;
     else if (go === 'editor') { openBoard(); showEditor(currentFen()); }
     else if (go === 'demo') startGame(gameFromPgn(DEMO_PGN));
     else if (go === 'recent') {
@@ -212,6 +361,7 @@ function bindEvents() {
       setTimeout(() => (S.username ? showRecentGames(S.username) : $('user-input').focus()), 50);
     }
   });
+  $('lessons-search').addEventListener('input', (e) => renderLessonList(e.target.value));
   $('hub-continue').onclick = () => {
     const { next } = lessonProgress();
     if (next) location.hash = '#lektion/' + next.id;
@@ -240,6 +390,15 @@ function bindEvents() {
   $('ctl-last').onclick = () => (S.mode === 'board' ? boardGo(Infinity) : go(S.game.moves.length));
   $('ctl-flip').onclick = flip;
   $('ctl-key').onclick = nextKey;
+  $('ov-actions').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-act]');
+    if (!b || !S.review) return;
+    const act = b.dataset.act;
+    if (act === 'summary') copyText(summaryText(), b);
+    else if (act === 'pgn') download(new Blob([buildPgn(S.game, S.review)], { type: 'application/x-chess-pgn' }), `${S.game.white.name}-${S.game.black.name}.pgn`.replace(/[^\w.-]+/g, '_'));
+    else if (act === 'share') copyText(`${location.origin}${location.pathname}#pgn=${await packPgn(buildPgn(S.game))}`, b);
+    else if (act === 'png') boardPng();
+  });
   $('moments').addEventListener('click', (e) => {
     const b = e.target.closest('.moment');
     if (b) { showMoves(); go(+b.dataset.ply); }
@@ -288,20 +447,65 @@ function bindEvents() {
       if (puzzleKey(e.key)) e.preventDefault();
       return;
     }
+    if (S.view === 'training') {
+      if (trainingKey(e.key)) e.preventDefault();
+      return;
+    }
+    if (e.key === '?') {
+      $('keys').showModal();
+      e.preventDefault();
+      return;
+    }
     if (S.view !== 'moves' && S.view !== 'overview') return;
     if (e.key === 'ArrowRight') {
       if (S.view === 'overview') { showMoves(); go(0); } else next();
     } else if (e.key === 'ArrowLeft') prev();
-    else if (e.key === 'Home' || e.key === 'ArrowUp') $('ctl-first').click();
-    else if (e.key === 'End' || e.key === 'ArrowDown') $('ctl-last').click();
+    else if (e.key === 'Home') $('ctl-first').click();
+    else if (e.key === 'End') $('ctl-last').click();
     else if (e.key.toLowerCase() === 'f') flip();
-    else if (e.key.toLowerCase() === 'n' && S.view === 'moves' && S.mode === 'game') nextKey();
+    else if (e.key.toLowerCase() === 'n' && S.view === 'moves' && S.mode === 'game') (e.shiftKey ? prevKey() : nextKey());
+    else if (e.key.toLowerCase() === 'd' && S.view === 'moves') showThreat();
+    else if (e.key.toLowerCase() === 'x' && S.view === 'moves' && S.mode === 'game') toggleOnlyBad();
     else return;
     e.preventDefault();
   });
   window.addEventListener('resize', () => {
     if (S.review) renderGraphs();
   });
+  // Mausrad über dem Brett blättert durch die Züge
+  let wheelAt = 0;
+  $('board').addEventListener('wheel', (e) => {
+    if (S.view !== 'moves' || (S.mode !== 'game' && S.mode !== 'board')) return;
+    e.preventDefault();
+    if (Math.abs(e.deltaY) < 4 || e.timeStamp - wheelAt < 70) return;
+    wheelAt = e.timeStamp;
+    if (e.deltaY > 0) next();
+    else prev();
+  }, { passive: false });
+  $('mt-bad').onclick = toggleOnlyBad;
+  $('mt-threat').onclick = showThreat;
+  $('mt-deep').onclick = deepen;
+  for (const id of ['graph-overview', 'graph-moves']) {
+    const wrap = $(id).parentElement;
+    const tip = document.createElement('div');
+    tip.className = 'graph-tip';
+    tip.hidden = true;
+    wrap.appendChild(tip);
+    wrap.addEventListener('pointermove', (e) => {
+      if (!S.review || !S.game) return;
+      const rect = wrap.getBoundingClientRect();
+      const n = S.game.moves.length;
+      const ply = Math.max(0, Math.min(n, Math.round(((e.clientX - rect.left) / rect.width) * n)));
+      const m = ply ? S.game.moves[ply - 1] : null;
+      const startNo = +S.game.startFen.split(' ')[5] || 1;
+      const offset = S.game.moves[0].color === 'b' ? 1 : 0;
+      const label = m ? `${startNo + Math.floor((ply - 1 + offset) / 2)}${m.color === 'w' ? '.' : '…'} ${sanDe(m.san)}` : 'Start';
+      tip.textContent = `${label} · ${evalText(S.review.evals[ply])}`;
+      tip.hidden = false;
+      tip.style.left = Math.max(2, Math.min(rect.width - tip.offsetWidth - 2, e.clientX - rect.left - tip.offsetWidth / 2)) + 'px';
+    });
+    wrap.addEventListener('pointerleave', () => { tip.hidden = true; });
+  }
   window.addEventListener('hashchange', routeFromHash);
 }
 
@@ -336,19 +540,58 @@ async function submitInput() {
   }
   try {
     if (/\[\w+\s+"/.test(text) || /\d\.\s*[a-hNBRQKO]/.test(text)) {
-      startGame(gameFromPgn(text));
+      openPgnText(text);
+      return;
+    }
+    const lichessId = parseLichessLink(text);
+    if (lichessId) {
+      setStatus('Lade die Partie von Lichess …', 'busy');
+      const game = await loadLichessGame(lichessId);
+      setStatus('');
+      startGame(game);
       return;
     }
     const link = parseGameLink(text);
     if (link) {
-      await loadLink(link, username);
+      await loadLink(link, S.site === 'chesscom' ? username : '');
       return;
     }
     if (/^[\w-]{2,40}$/.test(text)) {
       showRecentGames(text);
       return;
     }
-    setStatus('Das sieht nicht nach einem chess.com-Link, PGN oder Benutzernamen aus.', 'error');
+    setStatus('Das sieht nicht nach einem Link von chess.com oder Lichess, einem PGN oder einem Benutzernamen aus.', 'error');
+  } catch (e) {
+    reportLoadError(e);
+  }
+}
+
+/** PGN-Text öffnen: eine Partie direkt analysieren, bei mehreren eine Auswahlliste zeigen. */
+function openPgnText(text) {
+  const parts = splitPgn(text);
+  if (parts.length === 1) {
+    startGame(gameFromPgn(parts[0]));
+    return;
+  }
+  const entries = parts.slice(0, 400).map((pgn, i) => ({
+    id: 'pgnfile-' + i,
+    white: { name: pgnTag(pgn, 'White') || 'Weiß', rating: pgnTag(pgn, 'WhiteElo') || null },
+    black: { name: pgnTag(pgn, 'Black') || 'Schwarz', rating: pgnTag(pgn, 'BlackElo') || null },
+    result: pgnTag(pgn, 'Result') || '*', timeClass: '', at: 0, dateText: pgnTag(pgn, 'Date').replace(/\?/g, '').replace(/\.+$/, ''),
+    load: () => gameFromPgn(pgn),
+  }));
+  setStatus('');
+  showGamesList(`${parts.length} Partien in der Datei`, entries, '');
+}
+
+async function openPgnFile(file) {
+  if (!file) return;
+  if (file.size > 20 * 1024 * 1024) {
+    setStatus('Die Datei ist zu groß (maximal 20 MB).', 'error');
+    return;
+  }
+  try {
+    openPgnText(await file.text());
   } catch (e) {
     reportLoadError(e);
   }
@@ -378,42 +621,67 @@ function reportLoadError(e) {
   setStatus(e instanceof LoadError ? e.message : 'Das hat leider nicht geklappt. Bitte versuche es noch einmal.', 'error');
 }
 
-async function showRecentGames(username) {
-  setStatus(`Lade die letzten Partien von ${username} …`, 'busy');
+async function showRecentGames(username, months = 2) {
+  const site = S.site === 'lichess' ? 'Lichess' : 'chess.com';
+  setStatus(`Lade die letzten Partien von ${username} (${site}) …`, 'busy');
   try {
-    const games = await fetchRecentGames(username);
+    const entries = S.site === 'lichess' ? await fetchLichessGames(username, months * 30) : await fetchRecentGames(username, { months, limit: months * 60 });
     setStatus('');
     if (!$('user-input').value.trim()) {
       $('user-input').value = username;
       rememberUser();
     }
-    const me = username.toLowerCase();
-    $('games-title').textContent = `Letzte Partien von ${username}`;
-    const list = $('games-list');
-    list.innerHTML = games.length ? '' : '<li class="game-empty">Keine Partien in den letzten Monaten gefunden.</li>';
-    games.forEach((g) => {
-      const iAmWhite = g.white.username.toLowerCase() === me;
-      const mine = iAmWhite ? g.white : g.black;
-      const res = mine.result === 'win' ? 'win' : ['checkmated', 'resigned', 'timeout', 'abandoned', 'lose'].includes(mine.result) ? 'loss' : 'draw';
-      const li = document.createElement('li');
-      const date = g.end_time ? new Date(g.end_time * 1000).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '';
-      li.innerHTML = `<button type="button" class="game-item">
-        <span class="game-res ${res}">${{ win: 'S', loss: 'N', draw: 'R' }[res]}</span>
-        <span class="game-names">${esc(g.white.username)} <small>(${g.white.rating})</small> – ${esc(g.black.username)} <small>(${g.black.rating})</small></span>
-        <span class="game-meta">${esc(timeClassName(g.time_class))} · ${date}</span></button>`;
-      li.firstChild.onclick = () => {
-        try {
-          startGame(gameFromArchive(g));
-        } catch (e) {
-          reportLoadError(e);
-        }
-      };
-      list.appendChild(li);
-    });
-    $('games-card').hidden = false;
-    $('games-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    showGamesList(`Letzte Partien von ${username}`, entries, username.toLowerCase(), months < 12 ? () => showRecentGames(username, months + 2) : null);
   } catch (e) {
     reportLoadError(e);
+  }
+}
+
+/** Zeigt eine Auswahlliste von Partien mit Filtern (Zeitformat, Farbe, Ergebnis). */
+function showGamesList(title, entries, me, more = null) {
+  S.gamesList = { title, entries, me, more, filter: (S.gamesList && S.gamesList.me === me && S.gamesList.filter) || { tc: '', color: '', res: '' } };
+  $('games-title').textContent = title;
+  renderGamesList();
+  $('games-card').hidden = false;
+  $('games-card').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function renderGamesList() {
+  const { entries, me, more, filter } = S.gamesList;
+  const analyzed = new Set((S.metas || []).map((m) => m.id));
+  const mine = (g) => (!me ? null : g.white.name.toLowerCase() === me ? 'w' : g.black.name.toLowerCase() === me ? 'b' : null);
+  const outcome = (g) => { const c = mine(g); return !c || g.result === '*' ? null : g.result === '1/2-1/2' ? 'draw' : (g.result === '1-0') === (c === 'w') ? 'win' : 'loss'; };
+  const chip = (key, value, label) => `<button type="button" class="chip ${filter[key] === value ? 'on' : ''}" data-key="${key}" data-value="${value}">${label}</button>`;
+  const classes = [...new Set(entries.map((g) => g.timeClass).filter(Boolean))];
+  $('games-filter').innerHTML = (classes.length > 1 ? chip('tc', '', 'Alle') + classes.map((c) => chip('tc', c, timeClassName(c))).join('') + '<span class="chip-gap"></span>' : '')
+    + (me ? chip('color', '', 'Beide Farben') + chip('color', 'w', 'Weiß') + chip('color', 'b', 'Schwarz') + '<span class="chip-gap"></span>'
+      + chip('res', '', 'Alle Ergebnisse') + chip('res', 'win', 'Siege') + chip('res', 'loss', 'Niederlagen') + chip('res', 'draw', 'Remis') : '');
+  const shown = entries.filter((g) => (!filter.tc || g.timeClass === filter.tc) && (!filter.color || mine(g) === filter.color) && (!filter.res || outcome(g) === filter.res));
+  const list = $('games-list');
+  list.innerHTML = shown.length ? '' : '<li class="game-empty">Keine passenden Partien gefunden.</li>';
+  shown.forEach((g) => {
+    const res = outcome(g) || 'draw';
+    const letter = outcome(g) ? { win: 'S', loss: 'N', draw: 'R' }[res] : (g.result === '1-0' ? '1' : g.result === '0-1' ? '0' : '½');
+    const date = g.at ? new Date(g.at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: '2-digit' }) : (g.dateText || '');
+    const li = document.createElement('li');
+    li.innerHTML = `<button type="button" class="game-item">
+      <span class="game-res ${res}">${letter}</span>
+      <span class="game-names">${esc(g.white.name)} ${g.white.rating ? `<small>(${esc(g.white.rating)})</small>` : ''} – ${esc(g.black.name)} ${g.black.rating ? `<small>(${esc(g.black.rating)})</small>` : ''}</span>
+      <span class="game-meta">${analyzed.has(g.id) ? '<span class="done">✓ analysiert</span> · ' : ''}${esc([timeClassName(g.timeClass), date].filter(Boolean).join(' · '))}</span></button>`;
+    li.firstChild.onclick = () => {
+      try {
+        startGame(g.load());
+      } catch (e) {
+        reportLoadError(e);
+      }
+    };
+    list.appendChild(li);
+  });
+  if (more) {
+    const li = document.createElement('li');
+    li.innerHTML = '<button type="button" class="game-item more">Ältere Partien laden</button>';
+    li.firstChild.onclick = more;
+    list.appendChild(li);
   }
 }
 
@@ -421,31 +689,55 @@ function timeClassName(tc) {
   return { bullet: 'Bullet', blitz: 'Blitz', rapid: 'Schnellschach', daily: 'Fernschach' }[tc] || '';
 }
 
-function renderHistory() {
-  const hist = store.get('history', []);
-  $('history-card').hidden = !hist.length;
-  $('history-list').innerHTML = hist.map((h) => `<li><button type="button" class="game-item" data-id="${esc(h.id)}">
-      <span class="game-res draw">${h.result === '1-0' ? '1' : h.result === '0-1' ? '0' : '½'}</span>
-      <span class="game-names">${esc(h.white)} – ${esc(h.black)}</span>
-      <span class="game-meta">${esc(h.date || '')}</span></button></li>`).join('');
-  $('history-list').onclick = (e) => {
-    const b = e.target.closest('.game-item');
-    if (b) location.hash = '#' + b.dataset.id;
+async function renderHistory() {
+  const metas = (await db.all('meta').catch(() => [])).map((e) => e.value).sort((x, y) => (y.fav ? 1 : 0) - (x.fav ? 1 : 0) || y.at - x.at);
+  S.metas = metas;
+  $('history-card').hidden = !metas.length;
+  const shown = S.historyAll ? metas : metas.slice(0, 8);
+  $('history-list').innerHTML = shown.map((h) => {
+    const mine = h.you ? h.acc && h.acc[h.you] : null;
+    const res = !h.you ? 'draw' : (h.result === '1/2-1/2' ? 'draw' : (h.result === '1-0') === (h.you === 'w') ? 'win' : 'loss');
+    const letter = h.you ? { win: 'S', loss: 'N', draw: 'R' }[res] : (h.result === '1-0' ? '1' : h.result === '0-1' ? '0' : '½');
+    const info = [h.opening, mine != null ? `${mine.toFixed(0)} % genau` : '', h.date ? h.date.split('-').reverse().join('.') : ''].filter(Boolean).join(' · ');
+    return `<li class="hist-row"><button type="button" class="game-item" data-id="${esc(h.id)}">
+      <span class="game-res ${res}">${letter}</span>
+      <span class="game-names">${esc(h.white)} – ${esc(h.black)}<small class="game-sub">${esc(info)}</small></span></button>
+      <button type="button" class="icon-btn hist-fav ${h.fav ? 'on' : ''}" data-fav="${esc(h.id)}" title="Merken" aria-label="Partie merken">${uiIcon('star', 16)}</button>
+      <button type="button" class="icon-btn" data-del="${esc(h.id)}" title="Löschen" aria-label="Partie löschen">${uiIcon('trash', 16)}</button></li>`;
+  }).join('') + (metas.length > 8 && !S.historyAll ? `<li><button type="button" class="game-item more" data-more="1">Alle ${metas.length} Partien anzeigen</button></li>` : '');
+  $('history-list').onclick = async (e) => {
+    const fav = e.target.closest('[data-fav]'), del = e.target.closest('[data-del]');
+    if (fav) {
+      const m = metas.find((x) => x.id === fav.dataset.fav);
+      m.fav = !m.fav;
+      await db.set('meta', m.id, m);
+      renderHistory();
+    } else if (del) {
+      await Promise.all([db.del('meta', del.dataset.del), db.del('games', del.dataset.del)]);
+      renderHistory();
+    } else if (e.target.closest('[data-more]')) {
+      S.historyAll = true;
+      renderHistory();
+    } else {
+      const b = e.target.closest('.game-item');
+      if (b) location.hash = '#' + b.dataset.id;
+    }
   };
 }
 
-function saveToHistory(game, positions, depth) {
-  const hist = store.get('history', []).filter((h) => h.id !== game.id);
-  hist.unshift({ id: game.id, white: game.white.name, black: game.black.name, result: game.result, date: game.date });
-  const slim = positions.map((p) => ({
-    ...p,
-    lines: p.lines.map((l) => ({ ...l, pv: l.pv.slice(0, 12) })),
-  }));
-  while (hist.length > 12) store.del('g.' + hist.pop().id);
-  while (!store.set('g.' + game.id, { game, positions: slim, depth }) && hist.length > 1) {
-    store.del('g.' + hist.pop().id);
+/** Speichert Partie, Engine-Ergebnisse und Kurzfassung – und legt Trainingskarten für eigene Fehler an. */
+async function saveGame(c, positions, depth) {
+  const game = c.game;
+  const slim = positions.map((p) => ({ lines: p.lines.map((l) => ({ ...l, pv: l.pv.slice(0, 12) })), eval: p.eval, terminal: p.terminal, book: p.book }));
+  const old = await db.get('meta', game.id).catch(() => null);
+  const summary = { ...gameSummary(c), fav: old ? old.fav : false, at: old ? old.at : Date.now() };
+  await db.set('games', game.id, { game, positions: slim, depth, at: summary.at });
+  await db.set('meta', game.id, summary);
+  if (c.you) {
+    const known = new Set((await db.all('cards')).map((x) => x.key));
+    const fresh = mistakeCards(c, c.you).filter((x) => !known.has(x.id));
+    if (fresh.length) await db.setMany('cards', fresh.map((x) => [x.id, x]));
   }
-  store.set('history', hist);
 }
 
 async function routeFromHash() {
@@ -458,8 +750,44 @@ async function routeFromHash() {
     showAnalyze();
     return;
   }
+  if (id.startsWith('pgn=')) {
+    try {
+      startGame(gameFromPgn(await unpackPgn(id.slice(4))));
+    } catch (e) {
+      showAnalyze();
+      reportLoadError(e);
+    }
+    return;
+  }
   if (id === 'lektionen') {
     showLessons();
+    return;
+  }
+  if (id === 'training') {
+    leaveModes();
+    openTraining();
+    return;
+  }
+  if (id === 'profil') {
+    leaveModes();
+    S.view = 'profile';
+    showMain('profile');
+    document.title = 'Mein Profil · Chess Analyzer';
+    renderProfile();
+    window.scrollTo(0, 0);
+    return;
+  }
+  if (id === 'trainer' || id.startsWith('trainer/')) {
+    const [, tab, op] = id.split('/');
+    leaveModes();
+    openTrainers(tab === 'eroeffnungen' ? 'openings' : 'coords', op);
+    return;
+  }
+  if (id === 'spielen') {
+    if (S.mode !== 'play') {
+      leaveModes();
+      openPlay();
+    }
     return;
   }
   if (id === 'aufgaben') {
@@ -479,7 +807,7 @@ async function routeFromHash() {
     return;
   }
   if (S.game && S.game.id === id) return;
-  const cached = store.get('g.' + id, null);
+  const cached = await db.get('games', id).catch(() => null);
   if (cached && cached.game && cached.positions) {
     startGame(cached.game, cached);
     return;
@@ -494,10 +822,20 @@ async function routeFromHash() {
   }
 }
 
+/** Hält den Bildschirm während einer langen Analyse wach (wo der Browser das erlaubt). */
+function keepAwake() {
+  let lock = null;
+  let released = false;
+  if (navigator.wakeLock) {
+    navigator.wakeLock.request('screen').then((l) => { if (released) l.release(); else lock = l; }).catch(() => {});
+  }
+  return { release() { released = true; if (lock) lock.release().catch(() => {}); } };
+}
+
 /** Zeigt genau einen Hauptbereich: hub | home | lessons | review. */
 function showMain(name) {
-  for (const id of ['hub', 'home', 'lessons', 'review']) $(id).hidden = id !== name;
-  $('btn-new').hidden = name === 'hub';
+  for (const id of ['hub', 'home', 'lessons', 'profile', 'review']) $(id).hidden = id !== name;
+  $('btn-new').hidden = $('btn-board').hidden = name === 'hub';
 }
 
 /** Räumt auf, bevor ein anderer Bereich geöffnet wird (Engine stoppen, Sondermodi beenden). */
@@ -512,9 +850,12 @@ function leaveModes() {
   board.setInteractive(false);
   document.querySelector('.panel').classList.remove('is-editor');
   $('review').classList.remove('lesson-mode');
-  $('pane-editor').hidden = $('pane-lesson').hidden = $('pane-puzzle').hidden = true;
+  for (const id of ['pane-editor', 'pane-lesson', 'pane-puzzle', 'pane-play', 'pane-training', 'pane-trainer']) $(id).hidden = true;
   $('coach').hidden = false;
   leavePuzzles();
+  leavePlay();
+  leaveTraining();
+  leaveTrainers();
   S.game = S.review = S.variation = S.retry = null;
 }
 
@@ -536,6 +877,15 @@ function renderHub() {
   $('tile-prog').innerHTML = `<span>${done} von ${total} geschafft</span><div class="bar"><i style="width:${(done / total) * 100}%"></i></div>`;
   const pz = puzzleSummary();
   $('tile-puzzles').innerHTML = `<span>Wertung ${pz.rating} · ${pz.solved} gelöst</span>`;
+  trainingSummary().then((t) => {
+    $('tile-training').innerHTML = t.total ? `<span>${t.due} fällig · ${t.total} Karten</span>` : '<span>Füllt sich mit deinen Partien</span>';
+  });
+  const act = store.get('activity', {});
+  const today = act[new Date().toISOString().slice(0, 10)] || {};
+  const streak = dayStreak(act);
+  $('tile-profile').innerHTML = `<span>${streak === 1 ? '1 Tag' : streak + ' Tage'} in Folge · heute ${today.puzzles || 0} Aufgaben</span>`;
+  const tn = trainerSummary();
+  $('tile-trainer').innerHTML = `<span>${tn.learned} von ${tn.total} Eröffnungen${tn.coords ? ` · Rekord ${tn.coords} Felder` : ''}</span>`;
   const cont = $('hub-continue');
   cont.hidden = !next || done === 0;
   if (next) cont.innerHTML = `<div><span>Weiter lernen</span><b>${esc(next.title)}</b></div>${uiIcon('arrow', 22)}`;
@@ -546,6 +896,7 @@ function showAnalyze() {
   leaveModes();
   S.view = 'home';
   showMain('home');
+  warmEngine();
   setStatus('');
   document.title = 'Partie analysieren · Chess Analyzer';
   window.scrollTo(0, 0);
@@ -557,6 +908,7 @@ function showLessons() {
   showMain('lessons');
   const { done, total } = lessonProgress();
   $('lessons-lead').textContent = done ? `${done} von ${total} Lektionen geschafft. Mach da weiter, wo du aufgehört hast.` : `${total} kurze Lektionen mit Aufgaben direkt auf dem Brett. Fang einfach vorn an.`;
+  $('lessons-search').value = '';
   renderLessonList();
   document.title = 'Lektionen · Chess Analyzer';
   window.scrollTo(0, 0);
@@ -573,6 +925,93 @@ function enterLessonView(title) {
   $('pane-lesson').hidden = false;
   document.title = `${title} · Chess Analyzer`;
   window.scrollTo(0, 0);
+}
+
+/** Blendet alle Bereiche der Seitenleiste aus und zeigt nur den gewünschten (Brett ohne Bewertungsleiste). */
+function soloPane(id, mode, title) {
+  S.mode = mode;
+  S.view = mode;
+  showMain('review');
+  $('review').classList.add('lesson-mode');
+  for (const p of ['pane-progress', 'pane-overview', 'pane-moves', 'pane-editor', 'pane-lesson', 'pane-puzzle', 'pane-play', 'pane-training', 'pane-trainer']) $(p).hidden = p !== id;
+  $('controls').hidden = true;
+  document.title = `${title} · Chess Analyzer`;
+  window.scrollTo(0, 0);
+}
+
+function enterPlayView() {
+  soloPane('pane-play', 'play', 'Gegen den Computer');
+}
+
+/** Kurzfassung der Analyse als Text (zum Kopieren und Teilen). */
+function summaryText() {
+  const { game, review } = S;
+  const sum = S.summary;
+  const acc = (c) => (review.accuracy[c] == null ? '–' : review.accuracy[c].toFixed(1) + ' %');
+  const lines = [
+    `${game.white.name} – ${game.black.name}: ${game.result.replace('1/2-1/2', '½–½')}`,
+    `Genauigkeit: ${game.white.name} ${acc('w')}, ${game.black.name} ${acc('b')}`,
+  ];
+  if (review.opening) lines.push(`Eröffnung: ${review.opening.name}`);
+  lines.push([sum.text, sum.keyText].filter(Boolean).join(' '));
+  for (const t of sum.tips) lines.push(`${t.who}: ${t.items.join(' ')}`);
+  return lines.join('\n');
+}
+
+/** Zeichnet die aktuelle Stellung als Bild und lädt es herunter. */
+async function boardPng() {
+  const size = 960, sq = size / 8;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const g = canvas.getContext('2d');
+  const t = THEMES[S.settings.theme] || THEMES.green;
+  const flip = S.orientation === 'b';
+  for (let r = 0; r < 8; r++) for (let f = 0; f < 8; f++) {
+    g.fillStyle = (r + f) % 2 ? t.dark : t.light;
+    g.fillRect(f * sq, r * sq, sq, sq);
+  }
+  g.font = `700 ${sq * 0.17}px system-ui, sans-serif`;
+  for (let i = 0; i < 8; i++) {
+    g.fillStyle = i % 2 ? t.light : t.dark;
+    g.fillText(String(flip ? i + 1 : 8 - i), 5, i * sq + sq * 0.2);
+    g.fillStyle = i % 2 ? t.dark : t.light;
+    g.fillText('abcdefgh'[flip ? 7 - i : i], i * sq + sq * 0.86, size - 6);
+  }
+  const pieces = [...Board.parseFen(currentFen())];
+  await Promise.all(pieces.map(([square, code]) => new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const f = square.charCodeAt(0) - 97, r = +square[1] - 1;
+      g.drawImage(img, (flip ? 7 - f : f) * sq, (flip ? r : 7 - r) * sq, sq, sq);
+      resolve();
+    };
+    img.onerror = resolve;
+    img.src = `assets/pieces/${S.settings.pieces}/${code}.svg`;
+  })));
+  canvas.toBlob((blob) => blob && download(blob, 'stellung.png'), 'image/png');
+}
+
+/** Lädt eine Datei im Browser herunter. */
+function download(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+/** Zählt Aktivität für Tagesziel und Statistik (pro Kalendertag). */
+function bump(kind, info) {
+  const day = new Date().toISOString().slice(0, 10);
+  const act = store.get('activity', {});
+  act[day] = act[day] || {};
+  act[day][kind] = (act[day][kind] || 0) + 1;
+  const days = Object.keys(act).sort();
+  while (days.length > 120) delete act[days.shift()];
+  store.set('activity', act);
+  if (kind === 'played' && info && info.won) store.set('wins', Math.max(store.get('wins', 0), info.level));
 }
 
 /** Bereitet die Brettansicht für die Taktikaufgaben vor (wird vom Aufgaben-Modul aufgerufen). */
@@ -596,9 +1035,14 @@ async function initAccount() {
     if (res.ok) status = await res.json();
   } catch (e) { /* kein Passwortschutz auf diesem Server */ }
   if (!status || !status.configured) return;
+  $('pw-logout-all').onclick = async (e) => {
+    const res = await fetch('api/auth/logout-all', { method: 'POST' }).catch(() => null);
+    e.currentTarget.textContent = res && res.ok ? 'Erledigt – nur dieses Gerät ist noch angemeldet' : 'Das hat nicht geklappt';
+  };
   $('btn-logout').hidden = false;
   $('pw-box').hidden = false;
   $('btn-logout').onclick = async () => {
+    await clearOffline();
     await fetch('api/auth/logout', { method: 'POST' }).catch(() => {});
     location.href = location.pathname;
   };
@@ -611,7 +1055,7 @@ async function initAccount() {
     }).catch(() => null);
     const data = res ? await res.json().catch(() => ({})) : {};
     if (res && res.ok) {
-      msg.textContent = 'Passwort geändert.';
+      msg.textContent = 'Passwort geändert. Alle anderen Geräte wurden abgemeldet.';
       $('pw-current').value = $('pw-next').value = '';
     } else {
       msg.textContent = { wrong: 'Das aktuelle Passwort stimmt nicht.', weak: 'Das neue Passwort braucht mindestens 6 Zeichen.', locked: 'Zu viele Versuche. Bitte warte ein paar Minuten.' }[data.error] || 'Das hat nicht geklappt.';
@@ -622,6 +1066,61 @@ async function initAccount() {
 // ---------------------------------------------------------------------------
 // Analyse
 // ---------------------------------------------------------------------------
+
+/**
+ * Rechnet alle Stellungen einer Partie durch – ohne Buchzüge und ohne Stellungen, die schon im Speicher liegen.
+ */
+async function runEngine(game, book, depth, pool, onProgress) {
+  const known = {};
+  // 1) Buchzüge brauchen keine Engine: Stellungen vor dem letzten Theoriezug überspringen
+  const nBook = bookMoves(game, book);
+  for (let i = 0; i < nBook; i++) known[i] = { lines: [], eval: { type: 'cp', value: 20 }, book: true };
+  // 2) Stellungen, die schon einmal in dieser Tiefe gerechnet wurden, aus dem Speicher holen
+  const keyOf = (fen) => `${fen.split(' ').slice(0, 4).join(' ')}|${depth}`;
+  const hits = await db.getMany('evals', game.fens.map(keyOf)).catch(() => new Map());
+  game.fens.forEach((fen, i) => {
+    if (!known[i] && hits.has(keyOf(fen))) known[i] = hits.get(keyOf(fen));
+  });
+  const positions = await pool.analyze(game.fens, { depth, known, onProgress });
+  const fresh = [];
+  positions.forEach((p, i) => {
+    if (p.fresh) fresh.push([keyOf(game.fens[i]), { lines: p.lines.map((l) => ({ ...l, pv: l.pv.slice(0, 12) })), eval: p.eval }]);
+  });
+  db.setMany('evals', fresh).catch(() => {});
+  return positions;
+}
+
+/** Analysiert die letzten Partien des Nutzers nacheinander im Hintergrund (für das Schwächenprofil). */
+async function batchAnalyze(n, report) {
+  const entries = S.site === 'lichess' ? await fetchLichessGames(S.username, n * 3) : await fetchRecentGames(S.username, { months: 4, limit: 200 });
+  const book = await loadBook();
+  const me = S.username.toLowerCase();
+  const list = [];
+  for (const e of entries) {
+    if (list.length >= n) break;
+    if (await db.get('meta', e.id)) continue;
+    try {
+      list.push(e.load());
+    } catch (err) { /* Varianten überspringen */ }
+  }
+  if (!list.length) {
+    report(1, 1, 'Deine letzten Partien sind schon alle analysiert.');
+    return;
+  }
+  let done = 0;
+  for (const game of list) {
+    if (!report(done, list.length, `Partie ${done + 1} von ${list.length}: ${game.white.name} – ${game.black.name}`)) break;
+    const depth = S.settings.depth;
+    const positions = await runEngine(game, book, depth, new AnalysisPool(), null);
+    if (game.drawn) positions[positions.length - 1] = { lines: [], eval: { type: 'cp', value: 0 }, terminal: 'draw' };
+    const review = reviewGame(game, positions, book, scale());
+    const you = game.white.name.toLowerCase() === me ? 'w' : game.black.name.toLowerCase() === me ? 'b' : null;
+    await saveGame({ game, positions: review.positions, review, you }, positions, depth);
+    bump('games');
+    done++;
+  }
+  report(done, list.length, `${done} Partien analysiert.`);
+}
 
 async function loadBook() {
   if (!S.book) {
@@ -648,7 +1147,7 @@ async function startGame(game, cached) {
   S.ply = 0;
   S.view = 'analyzing';
   const me = S.username.toLowerCase();
-  S.you = !me ? null : game.white.name.toLowerCase() === me ? 'w' : game.black.name.toLowerCase() === me ? 'b' : null;
+  S.you = game.youHint || (!me ? null : game.white.name.toLowerCase() === me ? 'w' : game.black.name.toLowerCase() === me ? 'b' : null);
   S.orientation = S.you === 'b' ? 'b' : 'w';
   board.setOrientation(S.orientation);
 
@@ -672,28 +1171,29 @@ async function startGame(game, cached) {
   });
   loadAvatars(game);
 
-  const bookPromise = loadBook();
+  const book = await loadBook();
+  if (S.game !== game) return;
   let positions;
-  if (cached && cached.positions.length === game.fens.length) {
+  // Gespeicherte Analyse nur verwenden, wenn sie mindestens so tief gerechnet wurde wie jetzt eingestellt
+  if (cached && cached.positions.length === game.fens.length && (cached.depth || 0) >= S.settings.depth) {
     positions = cached.positions;
   } else {
     const pool = new AnalysisPool();
     S.pool = pool;
     let shown = 0;
+    const wake = keepAwake();
     try {
-      positions = await pool.analyze(game.fens, {
-        depth: S.settings.depth,
-        onProgress: (done, total, index) => {
-          if (S.pool !== pool) return;
-          $('progress-fill').style.width = `${(done / total) * 100}%`;
-          $('progress-label').textContent = `Analysiere Stellung ${done} von ${total} …`;
-          if (index > shown) {
-            shown = index;
-            board.setPosition(game.fens[index]);
-          }
-        },
+      positions = await runEngine(game, book, S.settings.depth, pool, (done, total, index) => {
+        if (S.pool !== pool) return;
+        $('progress-fill').style.width = `${(done / total) * 100}%`;
+        $('progress-label').textContent = `Analysiere Stellung ${done} von ${total} …`;
+        if (index > shown) {
+          shown = index;
+          board.setPosition(game.fens[index]);
+        }
       });
     } catch (e) {
+      wake.release();
       if (S.pool !== pool) return; // abgebrochen
       console.error(e);
       setCoach({
@@ -703,15 +1203,21 @@ async function startGame(game, cached) {
       $('progress-label').textContent = String(e.message || e);
       return;
     }
+    wake.release();
     if (S.pool !== pool) return;
     S.pool = null;
-    saveToHistory(game, positions, S.settings.depth);
+    cached = null;
+    bump('games');
+    if (document.hidden) playSound('end');
   }
-  const book = await bookPromise;
+  // Remis durch Stellungswiederholung oder 50-Züge-Regel: Die Schlussstellung ist remis, egal was die Engine meint
+  if (game.drawn) positions[positions.length - 1] = { lines: [], eval: { type: 'cp', value: 0 }, terminal: 'draw' };
   if (S.game !== game) return;
-  S.review = reviewGame(game, positions, book);
+  S.book = book;
+  S.review = reviewGame(game, positions, book, scale());
   buildMoveList();
   showOverview();
+  saveGame(ctx(), positions, (cached && cached.depth) || S.settings.depth).catch((e) => console.error(e));
 }
 
 async function loadAvatars(game) {
@@ -774,6 +1280,7 @@ function setYou(color) {
   board.setOrientation(color);
   S.review.diag = null;
   showOverview();
+  db.get('games', S.game.id).then((g) => g && saveGame(ctx(), g.positions, g.depth)).catch(() => {});
 }
 
 function showMoves() {
@@ -806,7 +1313,10 @@ function renderOverview() {
   const sum = S.summary;
   const phaseRows = sum.phases.filter((r) => r.w || r.b);
   $('phases').innerHTML = phaseRows.length ? `<h3>Partiephasen</h3><table class="counts">${phaseRows.map((r) =>
-    `<tr><td class="n">${r.w ? classIcon(r.w, 20) : '–'}</td><td class="lbl mid">${r.name}</td><td class="n">${r.b ? classIcon(r.b, 20) : '–'}</td></tr>`).join('')}</table>` : '';
+    `<tr><td class="n">${r.w ? classIcon(r.w, 20) : '–'}</td><td class="pct">${r.wAcc == null ? '' : r.wAcc.toFixed(0) + ' %'}</td><td class="lbl mid">${r.name}</td><td class="pct">${r.bAcc == null ? '' : r.bAcc.toFixed(0) + ' %'}</td><td class="n">${r.b ? classIcon(r.b, 20) : '–'}</td></tr>`).join('')}</table>` : '';
+  renderTimeBox();
+  $('ov-actions').innerHTML = [['summary', 'Fazit kopieren'], ['pgn', 'PGN herunterladen'], ['share', 'Link zum Teilen kopieren'], ['png', 'Brett als Bild']]
+    .map(([act, label]) => `<button type="button" class="btn soft small" data-act="${act}">${label}</button>`).join('');
   $('moments').innerHTML = sum.moments.length ? `<h3>Schlüsselmomente</h3><div class="moment-list">${sum.moments.map((m) =>
     `<button type="button" class="moment" data-ply="${m.ply}">${classIcon(m.cls, 18)}<b>${esc(m.label)}</b><span>${CLASSES[m.cls].label}</span></button>`).join('')}</div>` : '';
   $('tips').innerHTML = sum.tips.map((t) =>
@@ -816,6 +1326,24 @@ function renderOverview() {
     + (game.date ? `${op ? ' · ' : ''}${esc(game.date.split('-').reverse().join('.'))}` : '')
     + (game.timeClass ? ` · ${timeClassName(game.timeClass)}` : '');
   renderGraphs();
+}
+
+const fmtSec = (sec) => (sec >= 60 ? `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')} min` : `${sec < 10 ? sec.toFixed(1) : Math.round(sec)} s`);
+
+/** Zeitmanagement in der Übersicht: Durchschnitt, längstes Nachdenken, Zeitnot, vorschnelle Fehler. */
+function renderTimeBox() {
+  const { game, review } = S;
+  const items = [];
+  for (const c of S.you ? [S.you] : ['w', 'b']) {
+    const r = timeReport(game, review, c);
+    if (!r) continue;
+    const who = S.you ? 'Du' : esc(c === 'w' ? game.white.name : game.black.name);
+    const num = (k) => Math.floor(k / 2) + 1;
+    items.push(`${who}: im Schnitt ${fmtSec(r.avg)} pro Zug, am längsten bei Zug ${num(r.longest.k)} (${fmtSec(r.longest.sec)}).`);
+    if (r.trouble) items.push(`${who}: Zeitnot ab Zug ${num(r.troubleFrom)} – ${r.trouble} Züge mit weniger als ${fmtSec(r.limit)} auf der Uhr${r.troubleErrors ? `, dabei ${r.troubleErrors} grobe Fehler` : ''}.`);
+    if (r.fastErrors) items.push(`${who}: ${r.fastErrors} grobe Fehler blitzschnell gezogen, obwohl genug Zeit da war.`);
+  }
+  $('timebox').innerHTML = items.length ? `<h3>Zeiteinteilung</h3><ul class="time-list">${items.map((i) => `<li>${i}</li>`).join('')}</ul>` : '';
 }
 
 // ---------------------------------------------------------------------------
@@ -918,6 +1446,109 @@ function nextKey() {
   go(n);
 }
 
+/** Springt zum vorherigen Schlüsselmoment. */
+function prevKey() {
+  const from = S.retry ? S.retry.k + 1 : S.variation ? S.variation.returnPly : S.ply;
+  for (let k = from - 2; k >= 0; k--) {
+    if (KEY_CLASSES.has(S.review.moves[k].cls)) {
+      go(k + 1);
+      return;
+    }
+  }
+  go(0);
+}
+
+function toggleOnlyBad() {
+  const on = !$('moves').classList.contains('only-bad');
+  $('moves').classList.toggle('only-bad', on);
+  $('mt-bad').classList.toggle('on', on);
+  highlightMove();
+}
+
+/**
+ * „Was droht?“ – die Engine darf für die Seite ziehen, die gerade NICHT am Zug ist.
+ * So sieht man, was passiert, wenn man die Drohung ignoriert.
+ */
+async function showThreat() {
+  if (S.view !== 'moves' || (S.mode !== 'game' && S.mode !== 'board')) return;
+  const fen = currentFen();
+  if (S.threat && S.threat.fen === fen) {
+    S.threat = null;
+    renderTools();
+    board.setDecor(boardDecor());
+    return;
+  }
+  const flipped = new Chess(fen).isGameOver() ? null : flipTurn(fen);
+  const t = { fen, busy: !!flipped, text: flipped ? 'Die Engine sucht die Drohung …' : 'Hier gibt es nichts zu drohen: Die Seite am Zug steht im Schach oder die Partie ist vorbei.' };
+  S.threat = t;
+  renderTools();
+  if (!flipped) return;
+  threatEngine = threatEngine || new EnginePlayer();
+  let lines = [];
+  try {
+    lines = await threatEngine.lines(flipped, { depth: 14, multipv: 1 });
+  } catch (e) { /* unten als „nichts gefunden“ behandelt */ }
+  if (S.threat !== t) return;
+  t.busy = false;
+  const mv = lines[0] ? pvToMoves(flipped, lines[0].pv, 1)[0] : null;
+  const who = SIDE[flipped.split(' ')[1]];
+  if (!mv) t.text = 'Keine Drohung gefunden.';
+  else {
+    t.move = mv;
+    const mate = lines[0].eval.type === 'mate';
+    const taken = { p: 'einen Bauern', n: 'einen Springer', b: 'einen Läufer', r: 'einen Turm', q: 'die Dame' }[mv.captured];
+    const what = /#/.test(mv.san) ? ' – das wäre Matt!' : mate ? ' – mit Mattangriff!' : taken ? ` und schlägt ${taken}.` : /\+/.test(mv.san) ? ' mit Schach.' : '. Eine direkte Drohung ist das nicht.';
+    t.text = `Ohne Gegenwehr spielt ${who} **${sanDe(mv.san)}**${what}`;
+  }
+  renderTools();
+  board.setDecor(boardDecor());
+}
+
+/** Rechnet die aktuelle Partiestellung deutlich tiefer nach (nur auf Wunsch, kostet Zeit). */
+function deepen() {
+  if (S.mode !== 'game' || S.view !== 'moves' || S.variation || S.retry) return;
+  const fen = currentFen();
+  if (S.live && S.live.deep && S.live.fen === fen) {
+    live.stop();
+    S.live = null;
+    render();
+    return;
+  }
+  const state = { fen, lines: [], terminal: null, deep: true };
+  S.live = state;
+  let timer = null;
+  live.analyze(fen, {
+    depth: 26,
+    onUpdate: (lines, terminal) => {
+      if (S.live !== state) return;
+      state.lines = lines;
+      state.terminal = terminal;
+      if (!timer) {
+        timer = setTimeout(() => {
+          timer = null;
+          if (S.live === state) { renderLines(); renderTools(); }
+        }, 200);
+      }
+    },
+  });
+  renderTools();
+}
+
+function renderTools() {
+  const game = S.mode === 'game';
+  $('mv-tools').hidden = S.mode !== 'game' && S.mode !== 'board';
+  $('mt-bad').hidden = !game;
+  $('mt-deep').hidden = !game || !!S.variation || !!S.retry;
+  const deep = S.live && S.live.deep && S.live.fen === currentFen();
+  $('mt-deep').classList.toggle('on', !!deep);
+  $('mt-deep').textContent = deep ? 'Tiefer rechnen: stoppen' : 'Tiefer rechnen';
+  const t = S.threat && S.threat.fen === currentFen() ? S.threat : null;
+  if (!t) S.threat = null;
+  $('mt-threat').classList.toggle('on', !!t);
+  $('mv-note').hidden = !t;
+  $('mv-note').innerHTML = t ? (t.busy ? '<span class="spinner"></span> ' : '') + md(t.text) : '';
+}
+
 function flip() {
   S.orientation = S.orientation === 'w' ? 'b' : 'w';
   board.setOrientation(S.orientation);
@@ -932,6 +1563,9 @@ function flip() {
 function legalTargets(square) {
   if (S.mode === 'lesson') return lessonTargets(square);
   if (S.mode === 'puzzle') return puzzleTargets(square);
+  if (S.mode === 'play') return playTargets(square);
+  if (S.mode === 'training') return trainingTargets(square);
+  if (S.mode === 'trainer') return trainerTargets(square);
   if (S.view !== 'moves') return [];
   if (S.retry && S.retry.state !== 'waiting') return [];
   const chess = new Chess(currentFen());
@@ -954,6 +1588,18 @@ function onUserMove({ from, to, promotion }) {
   }
   if (S.mode === 'puzzle') {
     puzzleMove({ from, to, promotion });
+    return;
+  }
+  if (S.mode === 'play') {
+    playMove({ from, to, promotion });
+    return;
+  }
+  if (S.mode === 'training') {
+    trainingMove({ from, to, promotion });
+    return;
+  }
+  if (S.mode === 'trainer') {
+    trainerMove({ from, to, promotion });
     return;
   }
   const fen = currentFen();
@@ -1086,6 +1732,7 @@ function startLive() {
 function currentLines() {
   const v = S.variation;
   if (S.retry) return [];
+  if (!v && S.live && S.live.deep && S.live.fen === currentFen() && S.live.lines[0] && S.live.lines[0].depth >= 14) return S.live.lines;
   if (v && (v.idx > 0 || S.mode === 'board')) return S.live && S.live.fen === currentFen() ? S.live.lines : [];
   return S.review.positions[v ? v.basePly : S.ply].lines;
 }
@@ -1174,8 +1821,32 @@ function render() {
   renderCoach();
   renderLines();
   renderVariationBar();
+  renderTools();
   highlightMove();
   renderGraphs();
+  announce();
+}
+
+/** Sagt Screenreadern, welcher Zug gerade zu sehen ist. */
+function announce() {
+  let text = '';
+  if (S.mode === 'game' && !S.variation && !S.retry && S.ply > 0) {
+    const m = S.game.moves[S.ply - 1];
+    const cls = S.review.moves[S.ply - 1].cls;
+    text = `Zug ${Math.ceil(S.ply / 2)}, ${SIDE[m.color]}: ${spokenMove(m)}. ${CLASSES[cls].label || ''}`;
+  } else if (S.variation && S.variation.idx > 0) {
+    const m = S.variation.moves[S.variation.idx - 1];
+    text = `${SIDE[m.color]}: ${spokenMove(m)}`;
+  }
+  $('sr-status').textContent = text;
+  $('board').setAttribute('aria-label', `Schachbrett. ${new Chess(currentFen()).turn() === 'w' ? 'Weiß' : 'Schwarz'} am Zug.`);
+}
+
+function spokenMove(m) {
+  if (/^O-O-O/.test(m.san)) return 'lange Rochade';
+  if (/^O-O/.test(m.san)) return 'kurze Rochade';
+  const names = { p: 'Bauer', n: 'Springer', b: 'Läufer', r: 'Turm', q: 'Dame', k: 'König' };
+  return `${names[m.piece]} ${m.from} ${m.captured ? 'schlägt auf' : 'nach'} ${m.to}${/#/.test(m.san) ? ', Schachmatt' : /\+/.test(m.san) ? ', Schach' : ''}`;
 }
 
 const tint = (hex, a) => {
@@ -1236,6 +1907,10 @@ function boardDecor() {
     if ((cls === 'mistake' || cls === 'blunder') && reply) {
       decor.arrows.push({ from: reply.move.slice(0, 2), to: reply.move.slice(2, 4), color: CLASSES.blunder.color, opacity: 0.75 });
     }
+  }
+  if (!S.settings.lastMove && !S.retry) decor.squares = [];
+  if (S.threat && S.threat.move && S.threat.fen === currentFen() && !S.retry) {
+    decor.arrows.push({ from: S.threat.move.from, to: S.threat.move.to, color: CLASSES.blunder.color, opacity: 0.85 });
   }
   if (S.hoverArrow && !S.retry) {
     decor.arrows.push({ from: S.hoverArrow.slice(0, 2), to: S.hoverArrow.slice(2, 4), color: '#f7a531' });
@@ -1299,6 +1974,8 @@ function renderEvalBar(ev) {
   const num = $('evalbar-num');
   num.textContent = evalText(ev).replace(/^[+-]/, '');
   num.className = 'evalbar-num ' + (w >= 50 ? 'w' : 'b');
+  const lead = ev.type === 'mate' ? `Matt in ${Math.abs(ev.value)} für ${w > 50 ? 'Weiß' : 'Schwarz'}` : Math.abs(ev.value) < 30 ? 'ausgeglichen' : `${w > 50 ? 'Weiß' : 'Schwarz'} steht besser`;
+  $('evalbar').setAttribute('aria-label', `Bewertung ${evalText(ev)}, ${lead}`);
 }
 
 function evalChip(ev) {
@@ -1441,6 +2118,10 @@ function renderCoach() {
   const actions = [];
   if (ex.best) actions.push({ label: 'Bester Zug', icon: 'star', run: () => showBest(k) });
   if (BAD.has(ex.cls) && ex.best) actions.push({ label: 'Nochmal versuchen', icon: 'retry', run: () => startRetry(k) });
+  if (ex.cls === 'mistake' || ex.cls === 'blunder' || ex.cls === 'miss') {
+    const tag = TAGS[mistakeTag(ctx(), k)];
+    if (tag && tag.lesson) actions.push({ label: 'Lektion dazu', icon: 'book', run: () => { location.hash = '#lektion/' + tag.lesson; } });
+  }
   const paragraphs = ex.paragraphs.slice();
   if (S.ply === n) {
     const res = resultText(game);
@@ -1459,13 +2140,13 @@ function renderLines() {
     return;
   }
   const fen = currentFen();
-  const lines = currentLines();
+  const lines = S.settings.lines > 0 ? currentLines() : [];
   if (!lines.length) {
     el.innerHTML = '';
     return;
   }
   const depth = lines[0].depth ? ` · Tiefe ${lines[0].depth}` : '';
-  el.innerHTML = `<div class="lines-head">Engine-Linien${depth}</div>` + lines.slice(0, 3).map((l, i) => {
+  el.innerHTML = `<div class="lines-head">Engine-Linien${depth}</div>` + lines.slice(0, S.settings.lines).map((l, i) => {
     const moves = pvToMoves(fen, l.pv, 8);
     return `<button type="button" class="line" data-i="${i}" data-uci="${esc(l.move)}">${evalChip(l.eval)}<span class="line-moves">${esc(lineText(fen, moves))}</span></button>`;
   }).join('');
@@ -1490,19 +2171,23 @@ function buildMoveList() {
   let html = '';
   const startsBlack = game.moves[0].color === 'b';
   const first = +game.startFen.split(' ')[5] || 1;
+  const spent = timeSpent(game);
+  const isBad = (k) => k < game.moves.length && ['mistake', 'blunder', 'miss', 'inaccuracy'].includes(review.moves[k].cls);
+  const fmt = (t) => (t >= 60 ? Math.floor(t / 60) + ':' + String(Math.round(t % 60)).padStart(2, '0') : t < 10 ? t.toFixed(1) + 's' : Math.round(t) + 's');
   const cell = (k) => {
     const m = game.moves[k];
-    return `<button type="button" class="mv" data-ply="${k + 1}">${classIcon(review.moves[k].cls, 16)}<span>${esc(sanDe(m.san))}</span></button>`;
+    const t = spent && spent[k] != null ? `<em class="clk" title="Bedenkzeit für diesen Zug">${fmt(spent[k])}</em>` : '';
+    return `<button type="button" class="mv${isBad(k) ? ' bad' : ''}" data-ply="${k + 1}">${classIcon(review.moves[k].cls, 16)}<span>${esc(sanDe(m.san))}</span>${t}</button>`;
   };
   let k = 0;
   let num = first;
   if (startsBlack) {
-    html += `<div class="move-row"><span class="move-num">${num}.</span><span></span>${cell(0)}</div>`;
+    html += `<div class="move-row${isBad(0) ? ' has-bad' : ''}"><span class="move-num">${num}.</span><span></span>${cell(0)}</div>`;
     k = 1;
     num++;
   }
   for (; k < game.moves.length; k += 2, num++) {
-    html += `<div class="move-row"><span class="move-num">${num}.</span>${cell(k)}${k + 1 < game.moves.length ? cell(k + 1) : '<span></span>'}</div>`;
+    html += `<div class="move-row${isBad(k) || isBad(k + 1) ? ' has-bad' : ''}"><span class="move-num">${num}.</span>${cell(k)}${k + 1 < game.moves.length ? cell(k + 1) : '<span></span>'}</div>`;
   }
   html += `<div class="result-row">${esc(game.result === '*' ? '' : game.result.replace('1/2-1/2', '½–½'))}</div>`;
   $('moves').innerHTML = html;

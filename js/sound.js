@@ -1,6 +1,12 @@
 // Dezente Zuggeräusche, komplett per Web Audio erzeugt (keine Audiodateien nötig).
 let ctx = null;
 let enabled = true;
+let volume = 0.7;
+
+/** Lautstärke von 0 bis 1. */
+export function setVolume(v) {
+  volume = Math.max(0, Math.min(1, v));
+}
 
 export function setSoundEnabled(on) {
   enabled = on;
@@ -25,16 +31,16 @@ function knock(t, { freq = 190, gain = 0.5, len = 0.07 }) {
   osc.frequency.setValueAtTime(freq * 1.6, t);
   osc.frequency.exponentialRampToValueAtTime(freq, t + len);
   g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(gain, t + 0.004);
+  g.gain.exponentialRampToValueAtTime(Math.max(0.0002, gain * volume * 1.4), t + 0.004);
   g.gain.exponentialRampToValueAtTime(0.0001, t + len);
   osc.connect(g).connect(ac.destination);
   osc.start(t);
   osc.stop(t + len + 0.02);
 }
 
-/** kind: 'move' | 'capture' | 'check' | 'castle' | 'end' */
+/** kind: 'move' | 'capture' | 'check' | 'castle' | 'end' | 'error' */
 export function playSound(kind) {
-  if (!enabled) return;
+  if (!enabled || volume <= 0) return;
   const ac = audio();
   if (!ac) return;
   const t = ac.currentTime + 0.005;
@@ -47,6 +53,8 @@ export function playSound(kind) {
   } else if (kind === 'castle') {
     knock(t, { freq: 190, gain: 0.45 });
     knock(t + 0.09, { freq: 170, gain: 0.45 });
+  } else if (kind === 'error') {
+    knock(t, { freq: 110, gain: 0.4, len: 0.13 });
   } else if (kind === 'end') {
     knock(t, { freq: 330, gain: 0.3, len: 0.16 });
     knock(t + 0.14, { freq: 440, gain: 0.3, len: 0.22 });

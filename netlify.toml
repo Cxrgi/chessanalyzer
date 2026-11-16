@@ -4,7 +4,41 @@
 [functions]
   directory = "netlify/functions"
 
+# Sicherheits-Header für alle Seiten und Dateien.
+# Bewusst ohne script-src/style-src: Die Seite nutzt Inline-Styles, und Netlify blendet auf dem
+# kostenlosen Tarif ein eigenes Badge mit Inline-Skript ein, das nicht blockiert werden darf.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-Frame-Options = "DENY"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+    Content-Security-Policy = "base-uri 'self'; object-src 'none'; form-action 'self'"
+
+# Der Service Worker muss immer frisch geprüft werden, sonst kommen Updates nicht an.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json; charset=utf-8"
+
+# Lange cachen, was sich selten ändert – das spart Anfragen (und damit Netlify-Kontingent).
 [[headers]]
   for = "/vendor/*"
+  [headers.values]
+    Cache-Control = "public, max-age=2592000"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=2592000"
+
+[[headers]]
+  for = "/data/*"
   [headers.values]
     Cache-Control = "public, max-age=604800"
