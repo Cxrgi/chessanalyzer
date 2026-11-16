@@ -9,7 +9,8 @@ Nicht mit Chess.com verbunden. Die komplette Analyse läuft im Browser auf deine
 
 ## Was die Seite kann
 
-- **Passwortschutz**: Beim ersten Besuch legst du ein Passwort fest; danach kommt niemand ohne Anmeldung auf die Seite
+- **Benutzerkonten** mit eigenem Stand je Person, **Synchronisierung** zwischen allen Geräten und eine
+  **Verwaltung** für den Betreiber
 - **Startseite** mit allen Bereichen auf einen Blick
 - **Taktikaufgaben**: rund 13 500 Aufgaben von leicht bis schwer, automatisch passend zur eigenen Wertung –
   mit Wertungszahl, Serie, Statistik, Tipp, vorgespielter Lösung und Themen-Training (Gabel, Fesselung, Matt in 2 …)
@@ -23,7 +24,7 @@ Nicht mit Chess.com verbunden. Die komplette Analyse läuft im Browser auf deine
 - **Fehler-Training**: Fehler aus den eigenen Partien kommen als Aufgaben in wachsenden Abständen wieder, bis sie sitzen
 - **Trainer**: Eröffnungstrainer mit 36 Hauptvarianten und Koordinaten-Trainer
 - **Mein Profil**: Genauigkeit im Verlauf, häufigste Fehlerarten mit passender Lektion und Aufgaben, Zeitmanagement,
-  Serien, Abzeichen, mehrere Partien am Stück analysieren, Sicherung als Datei (Export/Import)
+  Serien, Abzeichen, mehrere Partien am Stück analysieren, Sicherungs-Code zum Kopieren und Einfügen
 - **Taktik-Extras**: Tagesaufgabe, „Sturm“ auf Zeit, Tipp in zwei Stufen, falsch gelöste Aufgaben kommen wieder,
   Statistik je Thema
 - **Exportieren und teilen**: kommentierte PGN (mit Bewertungen), Teilen-Link, Brett als Bild, Fazit als Text
@@ -47,20 +48,25 @@ Nicht mit Chess.com verbunden. Die komplette Analyse läuft im Browser auf deine
 - Uhren, geschlagene Figuren, Brett drehen, Tastatursteuerung (← → Pos1 Ende, F = drehen, N = nächster Schlüsselmoment), Töne
 - Brettfarben und Figurensets wählbar, bereits analysierte Partien werden im Browser gespeichert
 
-## Passwort
+## Konten und Verwaltung
 
-- Beim allerersten Aufruf fragt die Seite nach einem neuen Passwort und zeigt einmalig einen **Notfall-Code**.
-  Mit ihm lässt sich der Schutz zurücksetzen, falls das Passwort vergessen wurde („Passwort vergessen?“ auf der Anmeldeseite).
-- Ändern lässt sich das Passwort in den Einstellungen (Zahnrad), abmelden über das Symbol daneben.
-- Gespeichert wird nur ein gesalzener Hash – auf Netlify im Blob-Speicher `auth`, lokal in `.data/auth.json`.
-  Wer beides verloren hat (Passwort und Notfall-Code), löscht diesen Eintrag und richtet die Seite neu ein.
-- Geschützt sind Seite, Skripte, Daten und `/api/*`. Bilder, Stylesheet und die Engine-Dateien bleiben abrufbar.
-- Auf rein statischem Hosting (z. B. GitHub Pages) gibt es keinen Passwortschutz, weil dort kein Server-Code läuft.
-- Lokal ohne Passwort starten: `NO_PASSWORD=1 npm start`
-- Passwort ändern meldet alle anderen Geräte ab; in den Einstellungen gibt es außerdem „Auf allen anderen Geräten abmelden“.
-- Umgebungsvariable `SETUP_TOKEN`: Ist sie gesetzt, kann nur jemand mit diesem Code das erste Passwort festlegen.
-- Umgebungsvariable `REQUIRE_LOGIN=false` schaltet den Schutz ab (öffentliche Seite).
-- Beim Abmelden werden die offline gespeicherten Dateien vom Gerät gelöscht.
+- **Benutzerkonten:** Jede Person legt ein eigenes Konto an (Benutzername, Passwort, wo sie spielt und unter welchem
+  Namen). Partien, Fortschritt, Trainingskarten und Einstellungen gehören zum Konto und sind auf jedem Gerät gleich.
+- **Synchronisierung:** ein Abruf beim Öffnen, danach wird nur hochgeladen, wenn sich etwas geändert hat (gebündelt,
+  höchstens alle zwei Minuten). Analysierte Partien werden einmal hochgeladen und auf anderen Geräten bei Bedarf geholt.
+- **Sicherungs-Code** (im Profil): der komplette Stand als Text zum Kopieren und Einfügen – auch ohne Konto nutzbar.
+- **Abmelden** lädt erst alles hoch und entfernt dann den Stand von diesem Gerät, damit sich Konten nicht vermischen.
+- **Verwaltung** unter `/admin`, geschützt durch das Betreiber-Passwort (mit Notfall-Code zum Zurücksetzen):
+  Konten ansehen, sperren, abmelden, löschen (samt Daten), Übergangs-Passwort vergeben, Registrierung offen /
+  nur mit Einladungscode / geschlossen, Höchstzahl an Konten, Hinweistext für alle.
+- Gespeichert werden nur gesalzene Hashes, nie Passwörter – auf Netlify im Blob-Speicher (`auth` für Konten,
+  `sync` für die Stände), lokal im Ordner `.data/`.
+- Geschützt sind Seite, Skripte und `/api/*`. Bilder, Stylesheet, Engine und die freien Daten bleiben abrufbar.
+- Umgebungsvariable `SETUP_TOKEN`: Ist sie gesetzt, kann nur jemand mit diesem Code das erste Betreiber-Passwort festlegen.
+- `REQUIRE_LOGIN=false` (oder lokal `NO_PASSWORD=1 npm start`) schaltet Anmeldung, Konten und Synchronisierung ab;
+  dann liegt alles nur im jeweiligen Browser. Dasselbe gilt für rein statisches Hosting (z. B. GitHub Pages).
+- Wer die Seite öffentlich mit Konten betreibt, speichert personenbezogene Daten und braucht in Deutschland in der
+  Regel ein Impressum und eine Datenschutzerklärung.
 
 ## Starten
 
@@ -89,12 +95,13 @@ Deshalb holt eine winzige Server-Funktion (`server/proxy.mjs`) die Partie-Daten.
 ### Sparsam mit dem Netlify-Kontingent
 
 - Die Seite hat keinen Build-Schritt; es wird nur veröffentlicht, wenn du es auslöst.
-- Analyse, Aufgaben, Lektionen und alle Statistiken laufen im Browser. Der Server wird nur für die Anmeldung und für das
-  Laden einer chess.com-Partie per Link gebraucht.
+- Analyse, Aufgaben, Lektionen und alle Statistiken laufen im Browser. Der Server wird nur für die Anmeldung, die
+  Synchronisierung (wenige kleine Anfragen pro Sitzung) und das Laden einer chess.com-Partie per Link gebraucht.
 - Der Service Worker (`sw.js`) liefert bereits geladene Dateien aus dem Gerätespeicher. **Bei jeder Veröffentlichung
   `VERSION` in `sw.js` ändern**, damit alle Geräte die neuen Dateien holen (sonst dauert es bis zu einem Tag).
-- Bewusst nicht eingebaut, weil es laufend Kontingent kosten würde: Cloud-Synchronisierung, KI-Erklärungen,
-  Überwachung/Alarme und Zähler im Blob-Speicher.
+- Schutz vor Missbrauch: Höchstzahl an Konten, Bremse für Registrierungen und Fehlversuche, Größengrenzen je Konto.
+  Wird es trotzdem zu viel, lässt sich die Registrierung in der Verwaltung auf Einladungscode oder „geschlossen“ stellen.
+- Bewusst nicht eingebaut, weil es laufend Kontingent kosten würde: KI-Erklärungen und Überwachung/Alarme.
 
 ## Tests
 
@@ -103,14 +110,15 @@ npm test
 ```
 
 Prüft alle Lektionen (jede Lösung muss ein legaler Zug sein) und die Kernfunktionen: Links erkennen, Züge dekodieren,
-PGN lesen und schreiben, Zugbewertung, Eröffnungslinien und den Passwortschutz. Dieselben Tests laufen bei jedem Push
+PGN lesen und schreiben, Zugbewertung, Eröffnungslinien, Konten, Verwaltung und Synchronisierung. Dieselben Tests laufen bei jedem Push
 über GitHub Actions (`.github/workflows/ci.yml`).
 
 ## Grenzen
 
 - Nur normales Schach (kein Chess960 und keine anderen Varianten).
-- Alle Daten (Partien, Fortschritt, Einstellungen) liegen nur im Browser des jeweiligen Geräts. Zum Umziehen auf ein
-  anderes Gerät gibt es im Profil die Sicherung als Datei.
+- Ohne Konto (lokal ohne Anmeldung oder auf statischem Hosting) liegen alle Daten nur im Browser des jeweiligen Geräts.
+  Zum Umziehen gibt es im Profil den Sicherungs-Code.
+- Passwort vergessen: Es gibt keine E-Mail-Adresse im Konto – der Betreiber vergibt in der Verwaltung ein Übergangs-Passwort.
 - Die Lektionen sind eigene Inhalte zu den üblichen Themen eines Schachkurses – nicht die Lektionen von chess.com,
   denn deren Texte, Videos und Aufgaben sind urheberrechtlich geschützt.
 - Das Brett-Design, das du auf chess.com eingestellt hast, wird von chess.com nicht mitgeliefert – deshalb startet die Seite
@@ -148,7 +156,11 @@ sw.js                 Service Worker (offline, weniger Anfragen)
 manifest.webmanifest  App-Daten für „Zum Startbildschirm hinzufügen“
 tests/                Automatische Tests (node --test)
 data/puzzles/         Aufgaben nach Schwierigkeit (erzeugt mit tools/select-puzzles.py + tools/build-puzzles.mjs)
-server/gate.mjs       Passwortschutz (lokaler Server und Netlify Edge Function)
+server/gate.mjs       Anmeldung: Benutzerkonten und Verwaltung (lokaler Server und Netlify Edge Function)
+server/sync.mjs       Synchronisierung je Konto
+server/login-page.mjs Anmelde- und Registrierungsseite
+server/admin-page.mjs Verwaltung (/admin)
+js/sync.js            Synchronisierung im Browser, Sicherungs-Code (Zusammenführen: js/sync-merge.js)
 data/openings.json    Eröffnungsbuch (erzeugt mit tools/build-openings.mjs)
 server.js             Lokaler Server mit /api/game
 netlify/functions/    Dieselbe Funktion für Netlify

@@ -684,3 +684,17 @@ body { padding-bottom: env(safe-area-inset-bottom); }
   .moves { max-height: 42vh; }
   .review { padding-left: max(8px, env(safe-area-inset-left)); padding-right: max(8px, env(safe-area-inset-right)); }
 }
+
+/* ---- Synchronisierung und Sicherungs-Code -------------------------------- */
+.code-box { display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; }
+.code-box textarea { flex: 1; min-width: 0; background: var(--bg-2); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font: .8rem ui-monospace, Menlo, Consolas, monospace; resize: vertical; word-break: break-all; }
+.code-box textarea:focus { outline: none; border-color: var(--accent); }
+#backup-msg { margin: 10px 0 0; }
+#sync-status { color: var(--text); }
+
+/* ---- Konto ----------------------------------------------------------------- */
+.pw-form select { background: var(--bg-2); color: var(--text); border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; font: inherit; }
+.btn.danger { color: var(--danger); }
+.acc-admin { margin-top: 14px; }
+.acc-admin a { color: var(--muted); }
+.hub-notice { max-width: 640px; margin: 14px auto 0; background: rgba(62, 207, 142, .1); border: 1px solid rgba(62, 207, 142, .35); border-radius: 12px; padding: 10px 14px; font-size: .95rem; }

@@ -1,6 +1,7 @@
 // „Mein Profil“: Fortschritt, Schwächenprofil über alle analysierten Partien, Stapelanalyse der letzten
 // Partien sowie Sichern und Wiederherstellen aller Daten als Datei.
 import { db } from './db.js';
+import { syncInfo, syncNow, exportCode, importCode } from './sync.js';
 
 /** Fehlerarten mit passender Lektion und passendem Aufgaben-Thema. */
 export const TAGS = {
@@ -25,7 +26,6 @@ const avg = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : nul
 export function initProfile(deps) {
   d = deps;
   d.$('profile-body').addEventListener('click', onClick);
-  d.$('import-file').addEventListener('change', importData);
 }
 
 /** Tage in Folge mit Aktivität (bis heute oder gestern). */
@@ -166,10 +166,19 @@ export async function renderProfile() {
   html += '<section class="pf-card half" id="pf-ratings" hidden></section>';
 
   // --- Daten sichern ---
-  html += `<section class="pf-card half"><h2>Daten sichern</h2><p class="hint">Alles liegt nur in diesem Browser. Mit einer Sicherungsdatei nimmst du Partien, Fortschritt und Einstellungen auf ein anderes Gerät mit.</p>
-    <div class="pf-row"><button type="button" class="btn soft small" data-act="export">Sicherung herunterladen</button><button type="button" class="btn soft small" data-act="import">Sicherung einspielen</button><span class="hint" id="backup-msg"></span></div></section>`;
+  html += `<section class="pf-card half"><h2>Synchronisierung</h2>
+    <p class="hint">Dein Stand gehört zu deinem Konto: Partien, Fortschritt, Trainingskarten und Einstellungen sind auf jedem Gerät gleich, auf dem du dich anmeldest.</p>
+    <p class="hint" id="sync-status"></p>
+    <div class="pf-row" id="sync-buttons" hidden><button type="button" class="btn soft small" id="sync-now" data-act="sync-now">Jetzt abgleichen</button></div></section>`;
+  html += `<section class="pf-card half"><h2>Sicherungs-Code</h2>
+    <p class="hint">Dein kompletter Stand als Text: kopieren, auf einem anderen Gerät oder in einem anderen Browser einfügen – fertig. Vorhandenes wird dabei nicht überschrieben, sondern zusammengeführt.</p>
+    <div class="pf-row"><button type="button" class="btn soft small" data-act="export">Code kopieren</button><button type="button" class="btn soft small" data-act="import">Code einfügen</button></div>
+    <div class="code-box" id="code-box" hidden><textarea id="code-input" rows="3" spellcheck="false" autocomplete="off" placeholder="Code hier einfügen (beginnt mit CA1.)" aria-label="Sicherungs-Code"></textarea>
+      <button type="button" class="btn primary small" data-act="import-go">Einspielen</button></div>
+    <p class="hint" id="backup-msg"></p></section>`;
 
   d.$('profile-body').innerHTML = html;
+  renderSyncStatus();
   loadRatings();
 }
 
@@ -207,8 +216,11 @@ async function onClick(e) {
   const act = b.dataset.act;
   if (act === 'lesson') location.hash = '#lektion/' + b.dataset.id;
   else if (act === 'theme') d.openTheme(b.dataset.id);
-  else if (act === 'export') exportData();
-  else if (act === 'import') d.$('import-file').click();
+  else if (act === 'export') exportData(b);
+  else if (act === 'import') { d.$('code-box').hidden = false; d.$('code-input').focus(); }
+  else if (act === 'import-go') importData();
+  else if (act === 'sync-now') syncNow();
+
   else if (act === 'batch-stop' && batch) batch.stop = true;
   else if (act === 'batch') runBatch(+b.dataset.n);
 }
@@ -236,35 +248,60 @@ async function runBatch(n) {
   if (d.$('profile-body').offsetParent) renderProfile();
 }
 
-/** Sicherung: alle Einstellungen, der Fortschritt, die Partien und die Trainingskarten in einer Datei. */
-async function exportData() {
-  const local = {};
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i);
-    if (k.startsWith('ca.')) local[k] = localStorage.getItem(k);
-  }
-  const data = { app: 'chessanalyzer', version: 1, exported: new Date().toISOString(), local };
-  for (const s of ['games', 'meta', 'cards']) data[s] = await db.all(s);
-  const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
-  d.download(blob, `chessanalyzer-sicherung-${new Date().toISOString().slice(0, 10)}.json`);
-  d.$('backup-msg').textContent = `${data.meta.length} Partien gesichert.`;
+/** „vor 3 Min.“ */
+function ago(t) {
+  const min = Math.round((Date.now() - t) / 60000);
+  if (min < 1) return 'gerade eben';
+  if (min < 60) return `vor ${min} Min.`;
+  if (min < 24 * 60) return `vor ${Math.round(min / 60)} Std.`;
+  return 'am ' + new Date(t).toLocaleDateString('de-DE');
 }
 
-async function importData(e) {
-  const file = e.target.files[0];
-  e.target.value = '';
-  if (!file) return;
-  const msg = (t) => { if (d.$('backup-msg')) d.$('backup-msg').textContent = t; };
+/** Zeigt, ob und wann zuletzt mit den anderen Geräten abgeglichen wurde. */
+export function renderSyncStatus() {
+  const box = d.$('sync-status');
+  if (!box) return;
+  const s = syncInfo();
+  const on = s.started && s.available !== false;
+  d.$('sync-buttons').hidden = !on;
+  if (!on) {
+    box.textContent = s.started || s.available === false
+      ? 'Hier gibt es keine Konten – alles liegt nur in diesem Browser. Nimm deinen Stand mit dem Sicherungs-Code mit.'
+      : 'Wird geprüft …';
+    return;
+  }
+  box.textContent = s.off ? 'Ausgeschaltet – dieses Gerät behält seinen Stand für sich.'
+    : s.busy ? 'Gleiche ab …'
+      : s.error === 'offline' ? 'Kein Netz. Der Abgleich wird nachgeholt, sobald du wieder online bist.'
+        : s.error ? 'Der letzte Abgleich hat nicht geklappt. Es wird später noch einmal versucht.'
+          : s.at ? `Aktiv. Zuletzt abgeglichen ${ago(s.at)}${s.dirty ? ' – neue Änderungen werden gleich hochgeladen' : ''}.` : 'Aktiv.';
+}
+
+/** Sicherungs-Code: der komplette Stand als Text in der Zwischenablage. */
+async function exportData(button) {
+  const msg = d.$('backup-msg');
   try {
-    const data = JSON.parse(await file.text());
-    if (data.app !== 'chessanalyzer') throw new Error('falsche Datei');
-    for (const [k, v] of Object.entries(data.local || {})) if (k.startsWith('ca.') && typeof v === 'string') localStorage.setItem(k, v);
-    for (const s of ['games', 'meta', 'cards']) {
-      if (Array.isArray(data[s])) await db.setMany(s, data[s].filter((x) => x && x.key != null).map((x) => [x.key, x.value]));
-    }
-    msg('Sicherung eingespielt. Die Seite wird neu geladen …');
-    setTimeout(() => location.reload(), 900);
+    const { code, games } = await exportCode();
+    await d.copyText(code, button);
+    msg.textContent = `Code kopiert (${games === 1 ? '1 Partie' : games + ' Partien'}, ${code.length.toLocaleString('de-DE')} Zeichen). Füg ihn auf dem anderen Gerät unter „Code einfügen“ ein.`;
   } catch (err) {
-    msg('Diese Datei ist keine gültige Sicherung.');
+    msg.textContent = 'Das hat nicht geklappt.';
+  }
+}
+
+async function importData() {
+  const msg = d.$('backup-msg');
+  const text = d.$('code-input').value;
+  if (!text.trim()) {
+    msg.textContent = 'Füg zuerst den Code in das Feld ein.';
+    return;
+  }
+  try {
+    const { games } = await importCode(text);
+    d.$('code-input').value = '';
+    msg.textContent = `Eingespielt – ${games === 1 ? '1 Partie ist' : games + ' Partien sind'} jetzt auf diesem Gerät. Die Seite wird neu geladen …`;
+    setTimeout(() => location.reload(), 1200);
+  } catch (err) {
+    msg.textContent = 'Das ist kein gültiger Sicherungs-Code. Wurde er vollständig kopiert?';
   }
 }

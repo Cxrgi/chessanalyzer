@@ -3,13 +3,14 @@ import { Chess } from '../vendor/chess.js';
 import { openEditor, bindEditor } from './editor.js';
 import { initPuzzles, openPuzzles, puzzleTargets, puzzleMove, puzzleKey, puzzleSummary, leavePuzzles, themeName } from './puzzles.js';
 import { initTraining, openTraining, trainingTargets, trainingMove, trainingKey, trainingSummary, leaveTraining } from './training.js';
-import { initProfile, renderProfile, dayStreak, TAGS } from './profile.js';
+import { initProfile, renderProfile, renderSyncStatus, dayStreak, TAGS } from './profile.js';
 import { initPlay, openPlay, playTargets, playMove, leavePlay } from './play.js';
 import { initTrainers, openTrainers, trainerTargets, trainerMove, trainerSummary, leaveTrainers } from './trainers.js';
 import { initLessons, renderLessonList, openLesson, lessonTargets, lessonMove, lessonKey, lessonProgress } from './lessons.js';
 import { Board } from './board.js';
 import { AnalysisPool, LiveEngine, EnginePlayer, warmEngine } from './engine.js';
 import { db, migrateLegacy } from './db.js';
+import { initSync, startSync, skipSync, syncIfStale, flushSync, touch, forget, fetchGame } from './sync.js';
 import { parseLichessLink, loadLichessGame, fetchLichessGames } from './lichess.js';
 import { buildPgn, splitPgn, pgnTag, packPgn, unpackPgn } from './pgn.js';
 import { gameSummary, mistakeCards, mistakeTag, timeReport, timeSpent } from './insights.js';
@@ -61,9 +62,13 @@ const store = {
       return fallback;
     }
   },
-  set(key, value) {
+  /** silent = true: nur ablegen, nicht als Änderung des Nutzers für die Synchronisierung vormerken. */
+  set(key, value, silent = false) {
     try {
-      localStorage.setItem('ca.' + key, JSON.stringify(value));
+      const text = JSON.stringify(value);
+      const changed = localStorage.getItem('ca.' + key) !== text;
+      localStorage.setItem('ca.' + key, text);
+      if (changed && !silent) touch(key);
       return true;
     } catch (e) {
       return false;
@@ -97,6 +102,7 @@ const live = new LiveEngine();
 const scale = () => STRICTNESS[S.settings.strict] || 1;
 let board;
 let threatEngine = null;
+let drawSettings = () => {};
 
 // ---------------------------------------------------------------------------
 // Start
@@ -122,9 +128,10 @@ function init() {
   initTraining({ board, $, setCoach, playSound, enterTrainingView: () => soloPane('pane-training', 'training', 'Fehler-Training'), san: sanDe, evaluate: (fen) => live.evaluate(fen, 13), onCard: () => bump('cards') });
   initTrainers({ board, $, setCoach, store, esc, playSound, san: sanDe, enterTrainerView: (title) => soloPane('pane-trainer', 'trainer', title), openBoard: (fen, ucis) => openBoard(fen, ucis), onDone: (kind) => bump(kind === 'coords' ? 'coords' : 'openings') });
   initProfile({
-    $, esc, store, lessonProgress, username: () => S.username, batchAnalyze, download, themeName,
+    $, esc, store, lessonProgress, username: () => S.username, batchAnalyze, download, themeName, copyText,
     openTheme: (theme) => { store.set('puzzles', { ...store.get('puzzles', {}), theme }); location.hash = '#aufgaben'; },
   });
+  initSync({ onApplied: afterSync, onStatus: () => { if (S.view === 'profile') renderSyncStatus(); } });
   initAccount();
   routeFromHash();
   watchHostBadge();
@@ -135,6 +142,22 @@ function init() {
     const main = [...document.querySelectorAll('main')].find((m) => !m.hidden);
     if (main) { main.tabIndex = -1; main.focus(); }
   };
+}
+
+/** Ein anderes Gerät hat Neues geliefert: Einstellungen und sichtbare Listen auffrischen. */
+function afterSync() {
+  S.settings = { ...DEFAULTS, ...store.get('settings', {}) };
+  S.username = store.get('username', '');
+  S.site = store.get('site', 'chesscom');
+  applySettings();
+  drawSettings();
+  $('user-input').value = S.username;
+  $('site-input').value = S.site;
+  if (S.view === 'hub') {
+    renderHistory();
+    renderHub();
+  } else if (S.view === 'profile') renderProfile();
+  else if (S.mode === 'game' && S.review) refreshAfterSettings();
 }
 
 /**
@@ -211,7 +234,8 @@ function buildStaticIcons() {
   document.querySelectorAll('[data-ico]').forEach((el) => { el.innerHTML = uiIcon(el.dataset.ico, 24); });
 }
 
-function applySettings() {
+/** byUser = true, wenn der Nutzer gerade selbst etwas umgestellt hat (nur dann wird es an andere Geräte weitergegeben). */
+function applySettings(byUser = false) {
   const t = THEMES[S.settings.theme] || THEMES.green;
   document.documentElement.style.setProperty('--sq-light', t.light);
   document.documentElement.style.setProperty('--sq-dark', t.dark);
@@ -230,7 +254,7 @@ function applySettings() {
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.content = S.settings.mode === 'light' ? '#eef1f5' : '#11151b';
   $('btn-sound').innerHTML = uiIcon(S.settings.sound ? 'sound' : 'mute', 20);
-  store.set('settings', S.settings);
+  store.set('settings', S.settings, !byUser);
   if (S.view !== 'home' && S.game) renderPlayers();
 }
 
@@ -252,6 +276,7 @@ function buildSettingsDialog() {
       + `<label class="toggle range">Lautstärke <input type="range" id="set-volume" min="0" max="1" step="0.05" value="${S.settings.volume}"></label>`;
   };
   draw();
+  drawSettings = draw;
   $('settings').addEventListener('change', (e) => {
     const t = e.target;
     if (t.dataset.toggle) S.settings[t.dataset.toggle] = t.checked;
@@ -259,7 +284,7 @@ function buildSettingsDialog() {
       S.settings.volume = +t.value;
       S.settings.sound = S.settings.volume > 0;
     } else return;
-    applySettings();
+    applySettings(true);
     if (t.id === 'set-volume') playSound('move');
     refreshAfterSettings();
   });
@@ -272,7 +297,7 @@ function buildSettingsDialog() {
     else if (b.dataset.depth) S.settings.depth = +b.dataset.depth;
     else if (b.dataset.opt) S.settings[b.dataset.opt] = b.dataset.opt === 'lines' ? +b.dataset.value : b.dataset.value;
     else return;
-    applySettings();
+    applySettings(true);
     draw();
     refreshAfterSettings(b.dataset.opt);
   });
@@ -378,7 +403,7 @@ function bindEvents() {
   $('brand').onclick = (e) => { e.preventDefault(); goHome(); };
   $('btn-sound').onclick = () => {
     S.settings.sound = !S.settings.sound;
-    applySettings();
+    applySettings(true);
     if (S.settings.sound) playSound('move');
   };
   $('btn-cancel').onclick = goHome;
@@ -710,10 +735,13 @@ async function renderHistory() {
     if (fav) {
       const m = metas.find((x) => x.id === fav.dataset.fav);
       m.fav = !m.fav;
+      m.mod = Date.now();
       await db.set('meta', m.id, m);
+      touch();
       renderHistory();
     } else if (del) {
       await Promise.all([db.del('meta', del.dataset.del), db.del('games', del.dataset.del)]);
+      forget('g', del.dataset.del);
       renderHistory();
     } else if (e.target.closest('[data-more]')) {
       S.historyAll = true;
@@ -738,6 +766,7 @@ async function saveGame(c, positions, depth) {
     const fresh = mistakeCards(c, c.you).filter((x) => !known.has(x.id));
     if (fresh.length) await db.setMany('cards', fresh.map((x) => [x.id, x]));
   }
+  touch();
 }
 
 async function routeFromHash() {
@@ -807,10 +836,24 @@ async function routeFromHash() {
     return;
   }
   if (S.game && S.game.id === id) return;
-  const cached = await db.get('games', id).catch(() => null);
+  let cached = await db.get('games', id).catch(() => null);
+  // Auf einem anderen Gerät analysiert? Dann die fertige Analyse vom gemeinsamen Speicher holen.
+  if (!(cached && cached.game && cached.positions)) cached = (await fetchGame(id)) || cached;
+  if (location.hash.slice(1) !== encodeURIComponent(id) && decodeURIComponent(location.hash.slice(1)) !== id) return;
   if (cached && cached.game && cached.positions) {
     startGame(cached.game, cached);
     return;
+  }
+  if (cached && cached.pgn) {
+    // Aus einem Sicherungs-Code: Die Züge sind da, die Analyse wird neu berechnet.
+    try {
+      const game = gameFromPgn(cached.pgn);
+      const meta = await db.get('meta', id).catch(() => null);
+      game.id = id;
+      if (meta) Object.assign(game, { url: meta.url || game.url, youHint: meta.you || undefined });
+      startGame(game);
+      return;
+    } catch (e) { /* unten weiter: vielleicht lässt sich die Partie neu laden */ }
   }
   const m = id.match(/^(live|daily)-(\d+)$/);
   if (m) {
@@ -867,6 +910,7 @@ function goHome(fromHash) {
   setStatus('');
   renderHistory();
   renderHub();
+  syncIfStale();
   if (fromHash !== true && location.hash) history.pushState(null, '', location.pathname + location.search);
   document.title = 'Chess Analyzer';
   window.scrollTo(0, 0);
@@ -1028,38 +1072,129 @@ function enterPuzzleView() {
 }
 
 /** Anmeldung: Abmelden-Knopf und „Passwort ändern“ nur zeigen, wenn die Seite geschützt läuft. */
+/** Löscht den Stand dieses Geräts (beim Abmelden oder wenn sich ein anderes Konto anmeldet). */
+async function wipeLocal() {
+  try {
+    for (const key of Object.keys(localStorage)) if (key.startsWith('ca.')) localStorage.removeItem(key);
+  } catch (e) { /* kein Speicher – nichts zu löschen */ }
+  for (const s of ['games', 'meta', 'cards']) await db.clear(s).catch(() => {});
+}
+
+/**
+ * Konto: Wer ist angemeldet? Davon hängt ab, wessen Stand auf diesem Gerät liegt und womit synchronisiert wird.
+ * Ohne Konten (lokaler Start ohne Anmeldung, rein statisches Hosting) bleibt alles wie es ist – nur in diesem Browser.
+ */
 async function initAccount() {
   let status = null;
   try {
-    const res = await fetch('api/auth/status');
+    const res = await fetch('api/auth/status', { cache: 'no-store' });
     if (res.ok) status = await res.json();
-  } catch (e) { /* kein Passwortschutz auf diesem Server */ }
-  if (!status || !status.configured) return;
-  $('pw-logout-all').onclick = async (e) => {
-    const res = await fetch('api/auth/logout-all', { method: 'POST' }).catch(() => null);
-    e.currentTarget.textContent = res && res.ok ? 'Erledigt – nur dieses Gerät ist noch angemeldet' : 'Das hat nicht geklappt';
-  };
-  $('btn-logout').hidden = false;
-  $('pw-box').hidden = false;
-  $('btn-logout').onclick = async () => {
+  } catch (e) { /* keine Anmeldung auf diesem Server oder kein Netz */ }
+  if (!status || !status.accounts) {
+    skipSync();
+    return;
+  }
+  if (!status.authenticated) {
+    // Die Anmeldung gilt nicht mehr (abgemeldet, gesperrt oder gelöscht): zurück zur Anmeldeseite.
     await clearOffline();
-    await fetch('api/auth/logout', { method: 'POST' }).catch(() => {});
+    location.reload();
+    return;
+  }
+  const me = status.user;
+  const lname = me.name.toLowerCase();
+  let owner = null;
+  try { owner = localStorage.getItem('ca.account'); } catch (e) { /* egal */ }
+  if (owner && owner !== lname) {
+    // Auf diesem Gerät liegt noch der Stand eines anderen Kontos – der darf nicht vermischt werden.
+    await wipeLocal();
+    try { localStorage.setItem('ca.account', lname); } catch (e) { /* egal */ }
+    location.reload();
+    return;
+  }
+  try { localStorage.setItem('ca.account', lname); } catch (e) { /* egal */ }
+  S.account = me;
+  const handle = me.site === 'lichess' ? me.lichess : me.site === 'chesscom' ? me.chesscom : '';
+  if (!S.username && handle) {
+    S.username = handle;
+    S.site = me.site === 'lichess' ? 'lichess' : 'chesscom';
+    store.set('username', S.username);
+    store.set('site', S.site);
+    $('user-input').value = S.username;
+    $('site-input').value = S.site;
+  }
+  if (status.notice) {
+    $('hub-notice').textContent = status.notice;
+    $('hub-notice').hidden = false;
+  }
+  startSync();
+  bindAccount();
+}
+
+function bindAccount() {
+  const me = S.account;
+  const post = (action, body) => fetch('api/auth/' + action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).catch(() => null);
+  const TEXT = { wrong: 'Das aktuelle Passwort stimmt nicht.', weak: 'Das neue Passwort braucht mindestens 8 Zeichen.', locked: 'Zu viele Versuche. Bitte warte ein paar Minuten.', handle: 'Bitte gib deinen Benutzernamen auf der gewählten Schachseite an.', site: 'Bitte wähle aus, wo du spielst.' };
+  const fail = async (res) => (res ? TEXT[(await res.json().catch(() => ({}))).error] : null) || 'Das hat nicht geklappt.';
+  $('btn-logout').hidden = false;
+  $('acc-box').hidden = false;
+  $('acc-name').innerHTML = `Angemeldet als <b>${esc(me.name)}</b>.`;
+  $('acc-site').value = me.site;
+  $('acc-chesscom').value = me.chesscom || '';
+  $('acc-lichess').value = me.lichess || '';
+
+  const leave = async () => {
+    await wipeLocal();
+    await clearOffline();
     location.href = location.pathname;
   };
-  $('pw-save').onclick = async () => {
-    const msg = $('pw-msg');
-    msg.textContent = '';
-    const res = await fetch('api/auth/password', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ current: $('pw-current').value, next: $('pw-next').value }),
-    }).catch(() => null);
-    const data = res ? await res.json().catch(() => ({})) : {};
-    if (res && res.ok) {
-      msg.textContent = 'Passwort geändert. Alle anderen Geräte wurden abgemeldet.';
-      $('pw-current').value = $('pw-next').value = '';
-    } else {
-      msg.textContent = { wrong: 'Das aktuelle Passwort stimmt nicht.', weak: 'Das neue Passwort braucht mindestens 6 Zeichen.', locked: 'Zu viele Versuche. Bitte warte ein paar Minuten.' }[data.error] || 'Das hat nicht geklappt.';
+  $('btn-logout').onclick = async () => {
+    // Erst alles hochladen, dann den Stand von diesem Gerät entfernen – das nächste Konto fängt hier sauber an.
+    const saved = await flushSync();
+    if (!saved && !confirm('Deine letzten Änderungen konnten nicht gespeichert werden (kein Netz?). Wenn du dich jetzt abmeldest, gehen sie verloren. Trotzdem abmelden?')) return;
+    await post('logout');
+    await leave();
+  };
+  $('acc-save').onclick = async () => {
+    const body = { site: $('acc-site').value, chesscom: $('acc-chesscom').value.trim(), lichess: $('acc-lichess').value.trim() };
+    const res = await post('profile', body);
+    if (!res || !res.ok) {
+      $('acc-msg').textContent = await fail(res);
+      return;
     }
+    Object.assign(me, body);
+    const handle = body.site === 'lichess' ? body.lichess : body.site === 'chesscom' ? body.chesscom : '';
+    if (handle) {
+      S.username = handle;
+      S.site = body.site;
+      store.set('username', S.username);
+      store.set('site', S.site);
+      $('user-input').value = S.username;
+      $('site-input').value = S.site;
+    }
+    $('acc-msg').textContent = 'Gespeichert.';
+  };
+  $('pw-save').onclick = async () => {
+    const res = await post('password', { current: $('pw-current').value, next: $('pw-next').value });
+    if (res && res.ok) {
+      $('pw-msg').textContent = 'Passwort geändert. Alle anderen Geräte wurden abgemeldet.';
+      $('pw-current').value = $('pw-next').value = '';
+    } else $('pw-msg').textContent = await fail(res);
+  };
+  $('pw-logout-all').onclick = async (e) => {
+    const res = await post('logout-all');
+    e.currentTarget.textContent = res && res.ok ? 'Erledigt – nur dieses Gerät ist noch angemeldet' : 'Das hat nicht geklappt';
+  };
+  $('acc-delete').onclick = async () => {
+    const password = $('pw-current').value;
+    if (!password) {
+      $('pw-msg').textContent = 'Gib oben dein aktuelles Passwort ein, um das Konto zu löschen.';
+      $('pw-current').focus();
+      return;
+    }
+    if (!confirm(`Konto „${me.name}“ mit allen Partien, Statistiken und dem gesamten Fortschritt endgültig löschen?`)) return;
+    const res = await post('delete', { password });
+    if (res && res.ok) await leave();
+    else $('pw-msg').textContent = await fail(res);
   };
 }
 
