@@ -27,6 +27,12 @@ export const ENDGAMES = [
   { id: 'lucena', title: 'Turmendspiel: Brücke bauen', fen: '3K4/3P2k1/8/8/8/8/r7/5R2 w - - 0 1', you: 'w', goal: 'win', text: 'Turm auf die 4. Reihe, König heraus, am Ende mit dem Turm dazwischenziehen.' },
   { id: 'philidor', title: 'Turmendspiel: Remis halten', fen: '4k3/7R/r7/3KP3/8/8/8/8 w - - 0 1', you: 'b', goal: 'draw', text: 'Halte die 6. Reihe. Rückt der Bauer dorthin vor, geh mit dem Turm nach hinten und gib Schach.' },
   { id: 'kbbk', title: 'Matt mit dem Läuferpaar', fen: '8/8/8/4k3/8/8/8/KBB5 w - - 0 1', you: 'w', goal: 'win', text: 'Die Läufer bilden nebeneinander eine Wand, der König hilft – Matt gibt es nur in der Ecke.' },
+  // Bauernendspiele (alle mit Stockfish in Tiefe 30 geprüft: genau ein Zug führt zum Ziel)
+  { id: 'opposition', title: 'Opposition: König vor dem Bauern', fen: '4k3/8/4K3/4P3/8/8/8/8 w - - 0 1', you: 'w', goal: 'promote', text: 'Dein König steht vor dem Bauern auf der 6. Reihe – das gewinnt. Aber nur, wenn du die Opposition behältst: Geh mit dem König zur Seite (nicht zurück!) und schieb den Bauern im richtigen Moment.' },
+  { id: 'opposition-hold', title: 'Opposition: Remis verteidigen', fen: '4k3/8/8/4K3/4P3/8/8/8 b - - 0 1', you: 'b', goal: 'draw', text: 'Du bist am Zug. Stell deinen König dem weißen genau gegenüber (Opposition) und bleib immer vor dem Bauern. Weicht Weiß aus, gehst du mit.' },
+  { id: 'quadrat', title: 'Quadratregel: Wettlauf zur Dame', fen: '8/8/8/8/P4k2/8/8/7K w - - 0 1', you: 'w', goal: 'promote', text: 'Denk dir vom Bauern ein Quadrat bis zur Grundreihe. Steht der gegnerische König außerhalb, holt er den Bauern nicht mehr ein – also sofort laufen, nicht mit dem König trödeln!' },
+  { id: 'durchbruch', title: 'Bauerndurchbruch', fen: '8/ppp3k1/8/PPP5/8/8/8/6K1 w - - 0 1', you: 'w', goal: 'promote', text: 'Drei gegen drei – und doch gewinnst du: Mit einem Bauernopfer in der Mitte bricht einer deiner Bauern durch. Der schwarze König ist zu weit weg.' },
+  { id: 'kqkp', title: 'Dame gegen Bauer auf der 2. Reihe', fen: '8/8/8/8/8/8/3pk3/1Q5K w - - 0 1', you: 'w', goal: 'win', text: 'Mit Schachs und Fesselungen zwingst du den König vor seinen eigenen Bauern. Jedes Mal gewinnst du ein Tempo für deinen König – bis er hilft, den Bauern zu holen und mattzusetzen.' },
 ];
 
 let d = null; // von der App übergebene Helfer
@@ -94,7 +100,7 @@ function renderSetup() {
   d.$('play-levels').innerHTML = LEVELS.map((l) => `<button type="button" class="level ${l.n === p.level ? 'on' : ''}" data-level="${l.n}"><b>${l.n}</b><span>${l.name}</span><small>~${l.elo}</small></button>`).join('');
   d.$('play-color').innerHTML = [['w', 'Weiß'], ['b', 'Schwarz'], ['r', 'Zufall']].map(([c, n]) => `<button type="button" class="${p.color === c ? 'on' : ''}" data-color="${c}">${n}</button>`).join('');
   d.$('play-endgames').innerHTML = ENDGAMES.map((e) => `<button type="button" class="lesson-card ${done[e.id] ? 'done' : ''}" data-endgame="${e.id}">
-    <span class="lesson-num">${done[e.id] ? d.uiIcon('check', 18) : d.uiIcon('play', 16)}</span><span class="lesson-txt"><b>${e.title}</b><small>${e.goal === 'draw' ? 'Ziel: Remis halten' : 'Ziel: gewinnen'}</small></span></button>`).join('');
+    <span class="lesson-num">${done[e.id] ? d.uiIcon('check', 18) : d.uiIcon('play', 16)}</span><span class="lesson-txt"><b>${e.title}</b><small>${{ draw: 'Ziel: Remis halten', promote: 'Ziel: Bauer zur Dame bringen', win: 'Ziel: gewinnen' }[e.goal]}</small></span></button>`).join('');
 }
 
 function startGame({ level, you, fen = START, scenario = null }) {
@@ -120,11 +126,17 @@ function status() {
   return null;
 }
 
+/** Ziel der Endspiel-Aufgabe erreicht? (gewinnen, Remis halten oder Bauer sicher zur Dame bringen) */
+function goalMet(won, drawn) {
+  const g = G.scenario && G.scenario.goal;
+  return !!g && (((g === 'win' || g === 'promote') && won) || (g === 'draw' && drawn));
+}
+
 function finish(over) {
   G.over = over;
   const won = (over.result === '1-0') === (G.you === 'w') && over.result !== '1/2-1/2';
   const drawn = over.result === '1/2-1/2';
-  if (G.scenario && ((G.scenario.goal === 'win' && won) || (G.scenario.goal === 'draw' && drawn))) {
+  if (goalMet(won, drawn)) {
     d.store.set('endgames', { ...d.store.get('endgames', {}), [G.scenario.id]: true });
   }
   d.playSound('end');
@@ -139,6 +151,11 @@ function push(m) {
   d.playSound(m.captured ? 'capture' : /[+#]/.test(m.san) ? 'check' : 'move');
   const over = status();
   if (over) finish(over);
+  else if (G.scenario && G.scenario.goal === 'promote' && m.color === G.you && m.promotion) {
+    // Ziel „umwandeln“: geschafft, sobald die neue Figur nicht sofort geschlagen werden kann
+    const lost = G.chess.moves({ verbose: true }).some((x) => x.to === m.to);
+    if (!lost) finish({ result: G.you === 'w' ? '1-0' : '0-1', text: `Bauer umgewandelt – die neue ${{ q: 'Dame', r: 'Turm', b: 'Läufer', n: 'Springer' }[m.promotion]} ist in Sicherheit` });
+  }
 }
 
 async function engineMove() {
@@ -274,11 +291,11 @@ function render() {
   if (G.over) {
     const won = G.over.result !== '1/2-1/2' && (G.over.result === '1-0') === (G.you === 'w');
     const drawn = G.over.result === '1/2-1/2';
-    const goalMet = G.scenario && ((G.scenario.goal === 'win' && won) || (G.scenario.goal === 'draw' && drawn));
+    const goalOk = goalMet(won, drawn);
     d.setCoach({
-      cls: won || goalMet ? 'best' : drawn ? 'good' : 'mistake',
-      title: G.scenario ? (goalMet ? 'Geschafft!' : 'Ziel verfehlt') : won ? 'Gewonnen!' : drawn ? 'Remis' : 'Verloren',
-      paragraphs: [`${G.over.text}. ${G.scenario ? (goalMet ? 'Die Technik sitzt.' : 'Probier es gleich noch einmal – oder nimm Züge zurück.') : won ? 'Stark gespielt! Versuch dich an der nächsten Stufe.' : drawn ? 'Ein halber Punkt.' : 'Schau dir in der Analyse an, wo es gekippt ist.'}`],
+      cls: won || goalOk ? 'best' : drawn ? 'good' : 'mistake',
+      title: G.scenario ? (goalOk ? 'Geschafft!' : 'Ziel verfehlt') : won ? 'Gewonnen!' : drawn ? 'Remis' : 'Verloren',
+      paragraphs: [`${G.over.text}. ${G.scenario ? (goalOk ? 'Die Technik sitzt.' : 'Probier es gleich noch einmal – oder nimm Züge zurück.') : won ? 'Stark gespielt! Versuch dich an der nächsten Stufe.' : drawn ? 'Ein halber Punkt.' : 'Schau dir in der Analyse an, wo es gekippt ist.'}`],
       actions: [
         ...(hist.length >= 2 ? [{ label: 'Partie analysieren', icon: 'search', run: () => d.analyze(pgn(), G.you) }] : []),
         { label: G.scenario ? 'Nochmal' : 'Revanche', icon: 'retry', primary: true, run: () => startGame({ level: G.level, you: G.you, fen: G.start, scenario: G.scenario }) },
