@@ -158,6 +158,10 @@
       <section class="pane" id="pane-progress" hidden>
         <div class="progress"><div class="progress-fill" id="progress-fill"></div></div>
         <p class="progress-label" id="progress-label">Engine wird geladen …</p>
+        <div id="progress-live" hidden>
+          <div class="graph-wrap progress-graph"><svg id="graph-live" class="graph" viewBox="0 0 400 90" preserveAspectRatio="none" role="img" aria-label="Bewertungsverlauf, soweit schon gerechnet"></svg></div>
+          <p class="progress-stats" id="progress-stats" aria-live="polite"></p>
+        </div>
         <button class="btn ghost" id="btn-cancel">Abbrechen</button>
       </section>
 

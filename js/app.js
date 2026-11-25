@@ -14,7 +14,7 @@ import { initSync, startSync, skipSync, syncIfStale, flushSync, touch, forget, f
 import { parseLichessLink, loadLichessGame, fetchLichessGames } from './lichess.js';
 import { buildPgn, splitPgn, pgnTag, packPgn, unpackPgn } from './pgn.js';
 import { gameSummary, mistakeCards, mistakeTag, timeReport, timeSpent } from './insights.js';
-import { reviewGame, bookMoves, winPct, evalText, CLASSES, CLASS_ORDER, BAD, STRICTNESS, setPalette } from './analysis.js';
+import { reviewGame, bookMoves, winPct, evalText, previewAccuracy, CLASSES, CLASS_ORDER, BAD, STRICTNESS, setPalette } from './analysis.js';
 import { explainMove, summarize, resultText, describeMove, pvToMoves, lineText, sanDe, say, setNotation } from './coach.js';
 import { parseGameLink, loadByLink, gameFromPgn, gameFromArchive, fetchRecentGames, fetchAvatar, LoadError } from './chesscom.js';
 import { materialInfo, flipTurn } from './tactics.js';
@@ -1188,7 +1188,11 @@ function bindAccount() {
 /**
  * Rechnet alle Stellungen einer Partie durch – ohne Buchzüge und ohne Stellungen, die schon im Speicher liegen.
  */
-async function runEngine(game, book, depth, pool, onProgress) {
+/**
+ * @param onProgress (fertig, gesamt, Index, Ergebnis) – nach jeder frisch gerechneten Stellung
+ * @param onKnown    (Index, Ergebnis) – für Stellungen, die ohne Engine feststehen (Buch, Speicher)
+ */
+async function runEngine(game, book, depth, pool, onProgress, onKnown) {
   const known = {};
   // 1) Buchzüge brauchen keine Engine: Stellungen vor dem letzten Theoriezug überspringen
   const nBook = bookMoves(game, book);
@@ -1199,6 +1203,7 @@ async function runEngine(game, book, depth, pool, onProgress) {
   game.fens.forEach((fen, i) => {
     if (!known[i] && hits.has(keyOf(fen))) known[i] = hits.get(keyOf(fen));
   });
+  if (onKnown) for (const [i, p] of Object.entries(known)) onKnown(+i, p);
   const positions = await pool.analyze(game.fens, { depth, known, onProgress });
   const fresh = [];
   positions.forEach((p, i) => {
@@ -1300,16 +1305,29 @@ async function startGame(game, cached) {
     S.pool = pool;
     let shown = 0;
     const wake = keepAwake();
+    // Live-Vorschau: Bewertungsverlauf und vorläufige Genauigkeit füllen sich, während gerechnet wird
+    const liveEvals = new Array(game.fens.length);
+    let drawTimer = null;
+    const drawLive = () => {
+      if (drawTimer) return;
+      drawTimer = setTimeout(() => {
+        drawTimer = null;
+        if (S.pool === pool) renderLivePreview(game, liveEvals);
+      }, 180);
+    };
+    $('progress-live').hidden = true;
     try {
-      positions = await runEngine(game, book, S.settings.depth, pool, (done, total, index) => {
+      positions = await runEngine(game, book, S.settings.depth, pool, (done, total, index, result) => {
         if (S.pool !== pool) return;
         $('progress-fill').style.width = `${(done / total) * 100}%`;
         $('progress-label').textContent = `Analysiere Stellung ${done} von ${total} …`;
+        if (result) liveEvals[index] = result.eval;
+        drawLive();
         if (index > shown) {
           shown = index;
           board.setPosition(game.fens[index]);
         }
-      });
+      }, (index, result) => { liveEvals[index] = result.eval; });
     } catch (e) {
       wake.release();
       if (S.pool !== pool) return; // abgebrochen
@@ -1515,6 +1533,7 @@ function next() {
   if (S.retry) return;
   const v = S.variation;
   if (v) {
+    if (v.source === 'why') v.paused = true;
     if (v.idx < v.moves.length) {
       v.idx++;
       playSound(soundFor(v.moves[v.idx - 1]));
@@ -1536,6 +1555,17 @@ function prev() {
     return;
   }
   const v = S.variation;
+  if (v && v.source === 'why') {
+    v.paused = true;
+    if (v.idx > 0) {
+      v.idx--;
+      startLive();
+      render();
+    } else {
+      go(v.returnPly);
+    }
+    return;
+  }
   if (v) {
     if (v.idx > 1) {
       v.idx--;
@@ -1806,6 +1836,125 @@ function showBest(k) {
   }, 650);
 }
 
+// ---------------------------------------------------------------------------
+// „Zeig mir warum“: die entscheidende Fortsetzung Zug für Zug vorspielen
+// ---------------------------------------------------------------------------
+
+const WHY_KINDS = { inaccuracy: 'punish', mistake: 'punish', blunder: 'punish', miss: 'missed', brilliant: 'works', great: 'works' };
+
+/** Welche Zugfolge erklärt Zug k? null, wenn es für diese Bewertung nichts vorzuspielen gibt. */
+function whyLine(k) {
+  const kind = WHY_KINDS[S.review.moves[k].cls];
+  if (!kind) return null;
+  const base = kind === 'missed' ? k : k + 1; // verpasste Chance: was stattdessen ging; sonst: was danach passiert
+  const best = S.review.positions[base] && S.review.positions[base].lines[0];
+  if (!best) return null;
+  const mate = best.eval.type === 'mate';
+  const moves = pvToMoves(S.game.fens[base], best.pv, mate ? 9 : 6);
+  return moves.length ? { kind, base, moves, eval: best.eval } : null;
+}
+
+let whyTimer = null;
+function showWhy(k) {
+  const line = whyLine(k);
+  if (!line) return;
+  live.stop();
+  S.retry = null;
+  const v = {
+    basePly: line.base, returnPly: k + 1, moves: line.moves, idx: 0, source: 'why', k, kind: line.kind, lineEval: line.eval,
+    evals: [S.review.evals[line.base]], lines: [], judged: [], paused: false,
+  };
+  S.variation = v;
+  render();
+  playWhy(v, 900);
+}
+
+function playWhy(v, delay = 1250) {
+  clearTimeout(whyTimer);
+  v.paused = false;
+  const step = () => {
+    if (S.variation !== v || v.paused) return;
+    if (v.idx >= v.moves.length) {
+      render();
+      return;
+    }
+    v.idx++;
+    playSound(soundFor(v.moves[v.idx - 1]));
+    startLive();
+    render();
+    if (v.idx < v.moves.length) whyTimer = setTimeout(step, 1250);
+  };
+  whyTimer = setTimeout(step, delay);
+}
+
+function renderWhyCoach(v) {
+  const { game, review } = S;
+  const k = v.k;
+  const played = game.moves[k];
+  const cls = review.moves[k].cls;
+  const san = sanDe(played.san);
+  const mover = played.color;
+  const other = mover === 'w' ? 'b' : 'w';
+  const done = v.idx >= v.moves.length;
+  const title = v.kind === 'missed' ? `Diese Chance hat ${san} verpasst` : `Darum ist ${san} ${CLASSES[cls].noun}`;
+  const paragraphs = [];
+  if (v.idx === 0) {
+    if (v.kind === 'punish') paragraphs.push(S.you === other ? 'Schau, wie du den Zug bestrafen kannst.' : `Schau, wie ${SIDE[other]} den Zug bestrafen kann.`);
+    else if (v.kind === 'missed') paragraphs.push(`Statt ${san} ging **${sanDe(v.moves[0].san)}**. Schau, wohin das geführt hätte.`);
+    else paragraphs.push('Schau, was nach dem Zug passiert – die Engine zeigt die beste Fortsetzung für beide Seiten.');
+  } else {
+    const fen = game.fens[v.basePly];
+    paragraphs.push(`**${lineText(fen, v.moves.slice(0, v.idx))}**`);
+    const m = v.moves[v.idx - 1];
+    const before = v.idx === 1 ? fen : v.moves[v.idx - 2].fen;
+    const prevMove = v.idx === 1 ? (v.kind === 'missed' ? (k > 0 ? game.moves[k - 1] : null) : played) : v.moves[v.idx - 2];
+    const what = describeMove(before, m, prevMove, v.basePly + v.idx - 1);
+    if (what) paragraphs.push(`${say(ctx(), m.color, what)}.`);
+  }
+  if (done) {
+    const endFen = v.moves[v.moves.length - 1].fen;
+    const last = v.moves[v.moves.length - 1];
+    // Fazit: zuerst die Bewertung, Material nur, wenn es zur Bewertung passt.
+    // Verglichen wird mit der Stellung VOR dem besprochenen Zug, aus Sicht dessen, der ihn gemacht hat.
+    const sign = mover === 'w' ? 1 : -1;
+    const change = sign * (materialInfo(endFen).diff - materialInfo(game.fens[k]).diff);
+    const pts = Math.abs(change);
+    const unit = pts === 1 ? 'einen Bauern' : `${pts} Bauerneinheiten`;
+    const ev = v.lineEval;
+    const evText = `Bewertung: **${evalText(ev)}**.`;
+    const myWin = mover === 'w' ? winPct(ev) : 100 - winPct(ev);
+    const mateFor = ev.type === 'mate' ? (ev.value > 0 ? 'w' : 'b') : null;
+    const mated = last.color === 'w' ? 'b' : 'w';
+    // Verb passend zur Person: „du stehst“ / „Weiß steht“
+    const v2 = (c, du, er) => (S.you === c ? `${du} du` : `${er} ${SIDE[c]}`);
+    let end;
+    if (/#/.test(last.san)) end = S.you === mated ? 'Am Ende bist du matt.' : `Am Ende ist ${SIDE[mated]} matt.`;
+    else if (mateFor) end = v.kind === 'missed' ? `Das wäre auf ein Matt für ${SIDE[mateFor]} hinausgelaufen.` : `Das läuft auf ein Matt für ${SIDE[mateFor]} hinaus.`;
+    else if (v.kind === 'missed') {
+      end = change > 0
+        ? `Unterm Strich ${S.you === mover ? 'hättest du' : `hätte ${SIDE[mover]}`} ${unit} gewonnen. ${evText}`
+        : `Die Stellung wäre deutlich besser gewesen: Bewertung **${evalText(ev)}** statt ${evalText(S.review.evals[k + 1])}.`;
+    } else if (v.kind === 'punish') {
+      if (change <= -1) end = `Unterm Strich ${v2(mover, 'verlierst', 'verliert')} ${unit}. ${evText}`;
+      else if (change >= 1) end = `Zwar ${v2(mover, 'gewinnst', 'gewinnt')} dabei Material, die Stellung ist aber trotzdem schlechter. ${evText}`;
+      else end = `Das Material bleibt gleich, aber ${v2(mover, 'stehst', 'steht')} danach schlechter. ${evText}`;
+    } else if (change <= -1 && myWin >= 50) {
+      end = `Obwohl ${S.you === mover ? `du ${unit} weniger hast` : `${SIDE[mover]} ${unit} weniger hat`}, ${v2(mover, 'stehst', 'steht')} danach besser – darum ist der Zug so stark. ${evText}`;
+    } else if (change >= 1) end = `Am Ende ${v2(mover, 'gewinnst', 'gewinnt')} ${unit}. ${evText}`;
+    else if (myWin >= 50) end = `Damit ${v2(mover, 'stehst', 'steht')} danach besser. ${evText}`;
+    else end = `Das hält die Stellung zusammen – jeder andere Zug wäre schlechter gewesen. ${evText}`;
+    paragraphs.push(end.charAt(0).toUpperCase() + end.slice(1));
+  }
+  const n = game.moves.length;
+  const actions = [];
+  if (done) actions.push({ label: 'Nochmal', icon: 'retry', run: () => showWhy(k) });
+  else if (v.paused) actions.push({ label: 'Abspielen', icon: 'play', run: () => { playWhy(v, 200); render(); } });
+  else actions.push({ label: 'Anhalten', run: () => { v.paused = true; clearTimeout(whyTimer); render(); } });
+  actions.push({ label: 'Zurück zur Partie', icon: 'back', run: () => go(v.returnPly) });
+  actions.push({ label: 'Weiter', icon: 'arrow', primary: true, run: () => go(Math.min(n, k + 2)) });
+  setCoach({ cls: v.kind === 'missed' ? 'miss' : cls, title, chip: v.idx > 0 ? currentEval() : null, paragraphs, actions });
+}
+
 let liveTimer = null;
 function startLive() {
   const v = S.variation;
@@ -2014,6 +2163,9 @@ function boardDecor() {
     } else if (v.source === 'best' && v.moves[0]) {
       decor.arrows.push({ from: v.moves[0].from, to: v.moves[0].to, color: CLASSES.best.color });
     }
+    if (v.source === 'why' && v.moves[v.idx]) {
+      decor.arrows.push({ from: v.moves[v.idx].from, to: v.moves[v.idx].to, color: '#f7a531', opacity: 0.85 });
+    }
   } else if (S.ply > 0) {
     const m = game.moves[S.ply - 1];
     const cls = S.view === 'moves' ? review.moves[S.ply - 1].cls : null;
@@ -2167,6 +2319,10 @@ function renderCoach() {
     return;
   }
 
+  if (v && v.source === 'why') {
+    renderWhyCoach(v);
+    return;
+  }
   if (v) {
     const ev = currentEval();
     if (v.source === 'best') {
@@ -2234,6 +2390,7 @@ function renderCoach() {
   const k = S.ply - 1;
   const ex = explainMove(ctx(), k);
   const actions = [];
+  if (whyLine(k)) actions.push({ label: 'Zeig mir warum', icon: 'play', run: () => showWhy(k) });
   if (ex.best) actions.push({ label: 'Bester Zug', icon: 'star', run: () => showBest(k) });
   if (BAD.has(ex.cls) && ex.best) actions.push({ label: 'Nochmal versuchen', icon: 'retry', run: () => startRetry(k) });
   if (ex.cls === 'mistake' || ex.cls === 'blunder' || ex.cls === 'miss') {
@@ -2325,6 +2482,40 @@ function highlightMove() {
   } else {
     box.scrollTop = 0;
   }
+}
+
+/** Zeichnet während der Analyse den bisher bekannten Bewertungsverlauf und die vorläufige Genauigkeit. */
+function renderLivePreview(game, evals) {
+  const known = [];
+  evals.forEach((ev, i) => { if (ev) known.push(i); });
+  if (known.length < 2) return;
+  $('progress-live').hidden = false;
+  const svg = $('graph-live');
+  const W = svg.clientWidth, H = svg.clientHeight;
+  if (W && H) {
+    const n = Math.max(1, game.fens.length - 1);
+    const x = (i) => ((i / n) * W).toFixed(1);
+    const y = (ev) => (H - (winPct(ev) / 100) * H).toFixed(1);
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    let d = `M${x(known[0])},${H} `;
+    for (const i of known) d += `L${x(i)},${y(evals[i])} `;
+    d += `L${x(known[known.length - 1])},${H} Z`;
+    // Noch nicht gerechnete Abschnitte grau hinterlegen
+    let gaps = '';
+    for (let i = 0; i < game.fens.length; i++) {
+      if (evals[i]) continue;
+      let j = i;
+      while (j + 1 < game.fens.length && !evals[j + 1]) j++;
+      gaps += `<rect x="${x(Math.max(0, i - 0.5))}" y="0" width="${Math.max(2, ((j - i + 1) / n) * W).toFixed(1)}" height="${H}" fill="rgba(128,128,128,.18)"/>`;
+      i = j;
+    }
+    svg.innerHTML = `${gaps}<path d="${d}" fill="#f4f5f6"/><line x1="0" x2="${W}" y1="${H / 2}" y2="${H / 2}" stroke="rgba(128,128,128,.55)" stroke-width="1"/>`;
+  }
+  const acc = previewAccuracy(game, evals);
+  const fmt = (v) => (v == null ? '–' : v.toFixed(1) + ' %');
+  $('progress-stats').innerHTML = acc.moves >= 6
+    ? `Vorläufige Genauigkeit: <b>Weiß ${fmt(acc.w)}</b> · <b>Schwarz ${fmt(acc.b)}</b>`
+    : 'Die ersten Stellungen sind gerechnet …';
 }
 
 function renderGraphs() {

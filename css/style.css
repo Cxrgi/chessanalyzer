@@ -696,3 +696,9 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 .acc-admin { margin-top: 14px; }
 .acc-admin a { color: var(--muted); }
 .hub-notice { max-width: 640px; margin: 14px auto 0; background: rgba(62, 207, 142, .1); border: 1px solid rgba(62, 207, 142, .35); border-radius: 12px; padding: 10px 14px; font-size: .95rem; }
+
+/* ---- Live-Vorschau während der Analyse ----------------------------------- */
+#progress-live { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+#progress-live[hidden] { display: none; }
+.progress-graph { cursor: default; }
+.progress-stats { margin: 0; font-size: .93rem; }
