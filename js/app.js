@@ -17,7 +17,7 @@ import { buildPgn, splitPgn, pgnTag, packPgn, unpackPgn, packAnalysis, unpackAna
 import { gameSummary, mistakeCards, mistakeTag, timeReport, timeSpent } from './insights.js';
 import { reviewGame, bookMoves, winPct, evalText, previewAccuracy, CLASSES, CLASS_ORDER, BAD, STRICTNESS, setPalette } from './analysis.js';
 import { explainMove, summarize, resultText, describeMove, pvToMoves, lineText, sanDe, say, setNotation } from './coach.js';
-import { parseGameLink, loadByLink, gameFromPgn, gameFromArchive, fetchRecentGames, fetchAvatar, LoadError } from './chesscom.js';
+import { parseGameLink, loadByLink, gameFromPgn, fetchRecentGames, fetchAvatar, LoadError } from './chesscom.js';
 import { materialInfo, flipTurn } from './tactics.js';
 import { classIcon, uiIcon } from './icons.js';
 import { playSound, setSoundEnabled, setVolume } from './sound.js';
@@ -50,7 +50,7 @@ const PIECE_SETS = {
 const DEPTHS = { 12: 'Schnell', 16: 'Normal', 20: 'Tief' };
 // Weitere Einstellungen: [Schlüssel, Überschrift, Auswahl]
 const OPTIONS = [
-  ['mode', 'Design', { dark: 'Dunkel', light: 'Hell', auto: 'Wie das System' }],
+  ['mode', 'Design', { dark: 'Dunkel', light: 'Hell', auto: 'System-Standard' }],
   ['size', 'Brettgröße', { small: 'Klein', medium: 'Mittel', auto: 'Groß' }],
   ['notation', 'Schreibweise der Züge', { de: 'Deutsch (S, L, T, D)', en: 'Englisch (N, B, R, Q)', fig: 'Figuren (♘ ♗ ♖ ♕)' }],
   ['strict', 'Bewertung der Züge', { mild: 'Nachsichtig', normal: 'Normal', strict: 'Streng' }],
@@ -112,7 +112,10 @@ const S = {
 const live = new LiveEngine();
 const scale = () => STRICTNESS[S.settings.strict] || 1;
 const SYSTEM_LIGHT = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : { matches: false, addEventListener() {} };
-SYSTEM_LIGHT.addEventListener('change', () => { if (S.settings.mode === 'auto') applySettings(); });
+// Ältere Safari-Versionen kennen nur addListener
+const onSystemTheme = () => { if (S.settings.mode === 'auto') applySettings(); };
+if (SYSTEM_LIGHT.addEventListener) SYSTEM_LIGHT.addEventListener('change', onSystemTheme);
+else if (SYSTEM_LIGHT.addListener) SYSTEM_LIGHT.addListener(onSystemTheme);
 let board;
 let threatEngine = null;
 let drawSettings = () => {};
@@ -319,6 +322,7 @@ function refreshAfterSettings(opt) {
     return;
   }
   if (opt === 'strict') S.review = reviewGame(S.game, S.rawPositions || S.review.positions, S.book, scale());
+  S.rep = checkRepertoire(S.game, S.you, getRepertoire(store)); // z. B. nach einem Abgleich mit anderem Repertoire
   buildMoveList();
   if (S.view === 'overview') renderOverview();
   else if (S.view === 'moves') render();
@@ -1399,7 +1403,7 @@ function renderNewGames() {
     else if (running && NG.current.id === e.id) status = `<span class="ng-state">${Math.round((NG.current.done / Math.max(1, NG.current.total)) * 100)} %</span>`;
     else if (NG.queue.some((q) => q.id === e.id)) status = '<span class="ng-state">wartet</span>';
     else status = `<button type="button" class="btn soft small" data-ng-now="${esc(e.id)}">Jetzt ansehen</button>`;
-    return `<li><span class="game-res ${res}">${letter}</span><span class="ng-who">${who}<small>${esc(timeClassName(e.timeClass))} · ${esc(when)}</small></span>${status}</li>`;
+    return `<li><span class="game-res ${res}">${letter}</span><span class="ng-who">${who}<small>${esc([timeClassName(e.timeClass), when].filter(Boolean).join(' · '))}</small></span>${status}</li>`;
   }).join('');
   const head = open.length
     ? `${open.length === 1 ? 'Eine neue Partie' : `${open.length} neue Partien`} auf ${site}`
@@ -1426,7 +1430,8 @@ function enqueueNewGames() {
 }
 
 function pauseNewQueue() {
-  if (!NG.busy) return;
+  // auch wenn die Warteschlange gerade erst (verzögert) wieder anlaufen soll
+  if (!NG.busy && !NG.queue.length) return;
   NG.paused = true;
   if (NG.pool) NG.pool.cancel();
 }
@@ -1708,6 +1713,7 @@ function setYou(color) {
   board.setOrientation(color);
   S.review.diag = null;
   S.rep = checkRepertoire(S.game, S.you, getRepertoire(store));
+  buildMoveList();
   showOverview();
   db.get('games', S.game.id).then((g) => g && saveGame(ctx(), g.positions, g.depth)).catch(() => {});
 }
@@ -2657,7 +2663,6 @@ function renderCoach() {
     // eigene Variante
     const m = v.moves[v.idx - 1];
     const paragraphs = [];
-    const before = v.evals[v.idx - 1];
     const after = v.evals[v.idx];
     const done = S.live && S.live.fen === currentFen() && (S.live.terminal || (S.live.lines[0] && S.live.lines[0].depth >= 12));
     if (S.live && S.live.terminal && S.live.terminal.terminal === 'mate') {
@@ -2891,7 +2896,7 @@ function buildMoveList() {
   };
   // Gespeicherte Varianten stehen unter der Zeile mit dem Zug, den sie ersetzen
   const saved = (S.annot && S.annot.lines) || [];
-  const varRows = (from, to) => saved.filter((l) => l.base >= from && l.base < to).map((l) => {
+  const varRows = (from, to) => saved.filter((l) => l.base >= from && l.base < to && game.fens[l.base]).map((l) => {
     const moves = pvToMoves(game.fens[l.base], l.ucis, 60);
     return `<div class="var-row" data-line="${esc(l.id)}"><button type="button" class="var-open" title="Variante ansehen">(${esc(lineText(game.fens[l.base], moves))})</button>`
       + '<button type="button" class="var-del" title="Variante löschen" aria-label="Variante löschen">×</button></div>';

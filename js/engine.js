@@ -290,10 +290,11 @@ export class LiveEngine {
 
   async pump() {
     this.busy = true;
+    let job = null;
     try {
       await this.ensure();
       while (this.pending) {
-        const job = this.pending;
+        job = this.pending;
         this.pending = null;
         this.uci.send(`setoption name MultiPV value ${Math.max(1, this.multipv)}`);
         const lines = await search(this.uci, job.fen, {
@@ -304,9 +305,13 @@ export class LiveEngine {
         });
         if (job.token === this.token) job.onDone && job.onDone(lines, null);
         else job.onCancel && job.onCancel();
+        job = null;
       }
     } catch (e) {
+      // Engine ließ sich nicht starten: Wartende nicht hängen lassen (z. B. „Nochmal versuchen“)
       console.error(e);
+      for (const j of [job, this.pending]) if (j && j.onCancel) j.onCancel();
+      this.pending = null;
     } finally {
       this.busy = false;
     }

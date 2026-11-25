@@ -41,7 +41,7 @@ Nicht mit Chess.com verbunden. Die komplette Analyse läuft im Browser auf deine
   nacheinander im Hintergrund (eine eigene Analyse hat immer Vorrang)
 - **Eröffnungs-Repertoire**: Eröffnungen mit Weiß und Schwarz festlegen (aus dem Trainer, als eigene Linie oder vom
   Analysebrett); die Analyse zeigt, wo du oder dein Gegner davon abgewichen seid
-- **Einstellungen**: helles, dunkles oder automatisches Design (wie das System), 11 Brettfarben, 9 Figurensätze,
+- **Einstellungen**: helles, dunkles Design oder System-Standard, 11 Brettfarben, 9 Figurensätze,
   Brettgröße, Notation (deutsch, englisch, Figuren), Strenge der Bewertung, Zahl der Engine-Linien, Farben für
   Farbenblinde, Lautstärke, Animationen
 - **Offline nutzbar** und als App installierbar (Service Worker); einmal geladene Dateien kommen aus dem Gerätespeicher
