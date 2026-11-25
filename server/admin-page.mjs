@@ -10,7 +10,8 @@ export function adminPage({ nonce = '' } = {}) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <title>Verwaltung · Chess Analyzer</title>
-<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/logo-32.png" sizes="32x32" type="image/png">
 <style>${PAGE_STYLE}
   body.wide { place-items:start center; padding-top:28px; }
   .board { width:min(1040px,100%); display:grid; gap:16px; }

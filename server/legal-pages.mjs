@@ -24,7 +24,8 @@ const shell = (title, body) => `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <title>${title} · Chess Analyzer</title>
-<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/logo-32.png" sizes="32x32" type="image/png">
 <style>${STYLE}</style>
 </head>
 <body>

@@ -11,7 +11,7 @@ export const PAGE_STYLE = `
   .card { width:min(420px,100%); background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:26px 24px 22px; box-shadow:0 24px 60px -30px rgba(0,0,0,.8); }
   .brand { display:flex; align-items:center; gap:10px; font-size:1.15rem; margin-bottom:18px; }
   .brand b { color:var(--accent); }
-  .brand svg { width:34px; height:34px; }
+  .brand img { width:34px; height:34px; display:block; }
   h1 { font-size:1.45rem; margin:0 0 6px; letter-spacing:-.02em; }
   p { margin:0 0 16px; color:var(--muted); font-size:.95rem; }
   label { display:block; font-size:.82rem; font-weight:650; margin:12px 0 5px; }
@@ -32,7 +32,7 @@ export const PAGE_STYLE = `
   [hidden] { display:none !important; }`;
 
 export const BRAND = `<div class="brand">
-    <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#3ecf8e"/><path d="M11 25.5h11.5c0-5.5-1-7.400-2.300-9.600 1.800.3 3-.3 3.600-1.300.9-1.600-.7-3.300-2.700-5.300-1.700-1.700-4.200-3-7.100-3.200l-.9-1.900-1.900 2.600c-2.500 1.700-4 4.700-3.700 8.300l2.600 1.300 2.300-2.300c.4 1.900-.3 3.300-1.400 4.800-1.300 1.700-2 3.700-2 6.600z" fill="#11151b"/></svg>
+    <img src="/assets/logo.svg" alt="" width="34" height="34">
     <span>Chess<b>Analyzer</b></span>
   </div>`;
 
@@ -45,7 +45,8 @@ export function loginPage({ nonce = '', registration = 'open', notice = '' } = {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <title>Anmelden · Chess Analyzer</title>
-<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/logo-32.png" sizes="32x32" type="image/png">
 <style>${PAGE_STYLE}</style>
 </head>
 <body>

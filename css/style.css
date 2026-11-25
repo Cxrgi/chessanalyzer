@@ -49,7 +49,7 @@ a { color: var(--accent); }
 }
 .brand { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; font-size: 1.12rem; letter-spacing: -.01em; }
 .brand b { color: var(--accent); font-weight: 700; }
-.brand-mark { width: 30px; height: 30px; color: var(--accent); }
+.brand-mark { width: 30px; height: 30px; display: block; flex: none; }
 .topbar-actions { display: flex; align-items: center; gap: 6px; }
 
 .btn {
