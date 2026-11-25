@@ -8,11 +8,11 @@ import { initPlay, openPlay, playTargets, playMove, leavePlay } from './play.js'
 import { initTrainers, openTrainers, trainerTargets, trainerMove, trainerSummary, leaveTrainers } from './trainers.js';
 import { initLessons, renderLessonList, openLesson, lessonTargets, lessonMove, lessonKey, lessonProgress } from './lessons.js';
 import { Board } from './board.js';
-import { AnalysisPool, LiveEngine, EnginePlayer, warmEngine } from './engine.js';
+import { AnalysisPool, LiveEngine, EnginePlayer, warmEngine, terminalEval } from './engine.js';
 import { db, migrateLegacy } from './db.js';
 import { initSync, startSync, skipSync, syncIfStale, flushSync, touch, forget, fetchGame } from './sync.js';
 import { parseLichessLink, loadLichessGame, fetchLichessGames } from './lichess.js';
-import { buildPgn, splitPgn, pgnTag, packPgn, unpackPgn } from './pgn.js';
+import { buildPgn, splitPgn, pgnTag, packPgn, unpackPgn, packAnalysis, unpackAnalysis } from './pgn.js';
 import { gameSummary, mistakeCards, mistakeTag, timeReport, timeSpent } from './insights.js';
 import { reviewGame, bookMoves, winPct, evalText, previewAccuracy, CLASSES, CLASS_ORDER, BAD, STRICTNESS, setPalette } from './analysis.js';
 import { explainMove, summarize, resultText, describeMove, pvToMoves, lineText, sanDe, say, setNotation } from './coach.js';
@@ -303,7 +303,7 @@ function refreshAfterSettings(opt) {
     if (S.mode === 'board' && S.variation) render();
     return;
   }
-  if (opt === 'strict') S.review = reviewGame(S.game, S.review.positions, S.book, scale());
+  if (opt === 'strict') S.review = reviewGame(S.game, S.rawPositions || S.review.positions, S.book, scale());
   buildMoveList();
   if (S.view === 'overview') renderOverview();
   else if (S.view === 'moves') render();
@@ -433,7 +433,11 @@ function bindEvents() {
     const act = b.dataset.act;
     if (act === 'summary') copyText(summaryText(), b);
     else if (act === 'pgn') download(new Blob([buildPgn(S.game, S.review, S.annot)], { type: 'application/x-chess-pgn' }), `${S.game.white.name}-${S.game.black.name}.pgn`.replace(/[^\w.-]+/g, '_'));
-    else if (act === 'share') copyText(`${location.origin}${location.pathname}#pgn=${await packPgn(buildPgn(S.game))}`, b);
+    else if (act === 'share') {
+      // Link mit fertiger Analyse; nur bei sehr langen Partien (riesiger Link) nur mit den Zügen
+      const full = `${location.origin}${location.pathname}#a=${await packAnalysis(S.game, S.rawPositions || S.review.positions, S.analysisDepth || S.settings.depth)}`;
+      copyText(full.length <= 60000 ? full : `${location.origin}${location.pathname}#pgn=${await packPgn(buildPgn(S.game))}`, b);
+    }
     else if (act === 'png') boardPng();
   });
   $('moments').addEventListener('click', (e) => {
@@ -821,6 +825,21 @@ async function routeFromHash() {
   }
   if (id === 'analyse') {
     showAnalyze();
+    return;
+  }
+  if (id.startsWith('a=')) {
+    // Teilen-Link mit fertiger Analyse: sofort anzeigen, ohne neu zu rechnen
+    try {
+      const shared = await unpackAnalysis(id.slice(2));
+      const game = gameFromPgn(shared.pgn);
+      if (shared.id) game.id = shared.id;
+      if (shared.positions.length !== game.fens.length) throw new Error('passt nicht');
+      const positions = shared.positions.map((p, i) => (p === 'terminal' ? terminalEval(game.fens[i]) || { lines: [], eval: { type: 'cp', value: 0 }, terminal: 'draw' } : p));
+      startGame(game, { positions, depth: shared.depth, shared: true });
+    } catch (e) {
+      showAnalyze();
+      setStatus('Dieser Analyse-Link ist unvollständig oder beschädigt. Wurde er komplett kopiert?', 'error');
+    }
     return;
   }
   if (id.startsWith('pgn=')) {
@@ -1532,7 +1551,8 @@ async function startGame(game, cached) {
   if (S.game !== game) return;
   let positions;
   // Gespeicherte Analyse nur verwenden, wenn sie mindestens so tief gerechnet wurde wie jetzt eingestellt
-  if (cached && cached.positions.length === game.fens.length && (cached.depth || 0) >= S.settings.depth) {
+  // (Ein geteilter Link bringt seine Analyse mit und wird immer so übernommen.)
+  if (cached && cached.positions.length === game.fens.length && ((cached.depth || 0) >= S.settings.depth || cached.shared)) {
     positions = cached.positions;
   } else {
     const pool = new AnalysisPool();
@@ -1588,6 +1608,8 @@ async function startGame(game, cached) {
   S.annot = annot;
   S.noteOpen = null;
   S.book = book;
+  S.rawPositions = positions; // unverändert – für erneutes Bewerten (Strenge) und den Teilen-Link
+  S.analysisDepth = (cached && cached.depth) || S.settings.depth;
   S.review = reviewGame(game, positions, book, scale());
   buildMoveList();
   showOverview();
@@ -1690,7 +1712,7 @@ function renderOverview() {
   $('phases').innerHTML = phaseRows.length ? `<h3>Partiephasen</h3><table class="counts">${phaseRows.map((r) =>
     `<tr><td class="n">${r.w ? classIcon(r.w, 20) : '–'}</td><td class="pct">${r.wAcc == null ? '' : r.wAcc.toFixed(0) + ' %'}</td><td class="lbl mid">${r.name}</td><td class="pct">${r.bAcc == null ? '' : r.bAcc.toFixed(0) + ' %'}</td><td class="n">${r.b ? classIcon(r.b, 20) : '–'}</td></tr>`).join('')}</table>` : '';
   renderTimeBox();
-  $('ov-actions').innerHTML = [['summary', 'Fazit kopieren'], ['pgn', 'PGN herunterladen'], ['share', 'Link zum Teilen kopieren'], ['png', 'Brett als Bild']]
+  $('ov-actions').innerHTML = [['summary', 'Fazit kopieren'], ['pgn', 'PGN herunterladen'], ['share', 'Link mit Analyse kopieren'], ['png', 'Brett als Bild']]
     .map(([act, label]) => `<button type="button" class="btn soft small" data-act="${act}">${label}</button>`).join('');
   $('moments').innerHTML = sum.moments.length ? `<h3>Schlüsselmomente</h3><div class="moment-list">${sum.moments.map((m) =>
     `<button type="button" class="moment" data-ply="${m.ply}">${classIcon(m.cls, 18)}<b>${esc(m.label)}</b><span>${CLASSES[m.cls].label}</span></button>`).join('')}</div>` : '';

@@ -126,3 +126,45 @@ export async function unpackPgn(packed) {
   if (packed[0] === 'r') return new TextDecoder().decode(bytes);
   return new TextDecoder().decode(await pipe(bytes, new DecompressionStream('deflate-raw')));
 }
+
+// ---------------------------------------------------------------------------
+// Teilen-Link mit fertiger Analyse: Partie + Engine-Ergebnisse kompakt gepackt, damit der Empfänger
+// nichts neu rechnen muss. Alles steckt im Link selbst (nach dem #) – kein Server, kein Speicher.
+// ---------------------------------------------------------------------------
+
+const evOut = (ev) => (ev.type === 'mate' ? 'M' + ev.value : ev.value);
+const evIn = (x) => (typeof x === 'string' && x[0] === 'M' ? { type: 'mate', value: +x.slice(1) } : { type: 'cp', value: +x || 0 });
+
+/** @returns gepackter Text für „#a=…“ */
+export async function packAnalysis(game, positions, depth) {
+  const p = positions.map((pos) => {
+    if (pos.terminal) return 't';
+    if (pos.book) return 'b';
+    return [evOut(pos.eval), ...pos.lines.slice(0, 2).map((l, i) => [l.pv.slice(0, i ? 6 : 10).join(' '), evOut(l.eval), l.depth || 0])];
+  });
+  return packPgn(JSON.stringify({ v: 1, id: game.id, d: depth, pgn: buildPgn(game), p }));
+}
+
+/**
+ * Liest einen gepackten Analyse-Link. Endstellungen (Matt, Patt …) ergänzt der Aufrufer selbst.
+ * @returns { pgn, id, depth, positions } – positions[i] ist 'terminal' oder ein Engine-Ergebnis
+ */
+export async function unpackAnalysis(packed) {
+  const data = JSON.parse(await unpackPgn(packed));
+  if (!data || data.v !== 1 || typeof data.pgn !== 'string' || !Array.isArray(data.p)) throw new Error('kein Analyse-Link');
+  const positions = data.p.map((x) => {
+    if (x === 't') return 'terminal';
+    if (x === 'b') return { lines: [], eval: { type: 'cp', value: 20 }, book: true };
+    if (!Array.isArray(x)) throw new Error('beschädigt');
+    const [e, ...lines] = x;
+    return {
+      eval: evIn(e),
+      lines: lines.map(([pv, ev, depth]) => {
+        const moves = String(pv || '').split(' ').filter((u) => /^[a-h][1-8][a-h][1-8][qrbn]?$/.test(u));
+        return { move: moves[0], pv: moves, eval: evIn(ev), depth: +depth || 0 };
+      }).filter((l) => l.move),
+    };
+  });
+  const id = typeof data.id === 'string' && /^[A-Za-z0-9_.:-]{1,80}$/.test(data.id) ? data.id : null;
+  return { pgn: data.pgn, id, depth: +data.d || 0, positions };
+}
