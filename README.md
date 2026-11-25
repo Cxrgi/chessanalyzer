@@ -20,18 +20,30 @@ Nicht mit Chess.com verbunden. Die komplette Analyse läuft im Browser auf deine
 - **Partie laden** über einen chess.com- oder Lichess-Link, über deinen Benutzernamen (Liste der letzten Partien
   mit Filtern), per PGN-Text oder PGN-Datei (auch per Drag & Drop, auch mit mehreren Partien)
 - **Gegen den Computer spielen** in acht Stärkestufen (Zug zurück, Tipp, danach direkt analysieren) und
-  **Endspiel-Trainer** mit den wichtigsten Mattführungen und Turmendspielen
+  **Endspiel-Trainer** mit Mattführungen, Turmendspielen und Bauernendspielen (Opposition, Quadratregel, Durchbruch,
+  Dame gegen Bauer) – alle Stellungen mit Stockfish geprüft
 - **Fehler-Training**: Fehler aus den eigenen Partien kommen als Aufgaben in wachsenden Abständen wieder, bis sie sitzen
 - **Trainer**: Eröffnungstrainer mit 36 Hauptvarianten und Koordinaten-Trainer
 - **Mein Profil**: Genauigkeit im Verlauf, häufigste Fehlerarten mit passender Lektion und Aufgaben, Zeitmanagement,
   Serien, Abzeichen, mehrere Partien am Stück analysieren, Sicherungs-Code zum Kopieren und Einfügen
 - **Taktik-Extras**: Tagesaufgabe, „Sturm“ auf Zeit, Tipp in zwei Stufen, falsch gelöste Aufgaben kommen wieder,
   Statistik je Thema
-- **Exportieren und teilen**: kommentierte PGN (mit Bewertungen), Teilen-Link, Brett als Bild, Fazit als Text
+- **Exportieren und teilen**: kommentierte PGN (mit Bewertungen), Teilen-Link mit fertiger Analyse (der Empfänger muss
+  nichts neu rechnen), Brett als Bild, Fazit als Text
 - **Werkzeuge in der Analyse**: „Nur Fehler“, „Drohung zeigen“, „Tiefer rechnen“, eigene Pfeile und Markierungen per
   Rechtsklick, Mausrad zum Blättern, Tastenkürzel-Übersicht mit `?`
-- **Einstellungen**: helles oder dunkles Design, Brettgröße, Notation (deutsch, englisch, Figuren), Strenge der
-  Bewertung, Zahl der Engine-Linien, Farben für Farbenblinde, Lautstärke, Animationen
+- **Live-Vorschau**: Während die Engine rechnet, füllen sich Bewertungsverlauf und vorläufige Genauigkeit
+- **„Zeig mir warum“**: Bei Fehlern spielt der Coach die Bestrafung vor, bei verpassten Chancen den besseren Weg und bei
+  brillanten oder großartigen Zügen, warum sie funktionieren – mit Fazit zu Material und Bewertung
+- **Eigene Varianten und Notizen** zu jeder Partie: bleiben gespeichert, werden mit dem Konto abgeglichen und stehen in
+  der PGN-Datei als Nebenvarianten und Kommentare
+- **Neue Partien**: Die Startseite erkennt neue Partien deines chess.com- oder Lichess-Kontos und analysiert sie auf Wunsch
+  nacheinander im Hintergrund (eine eigene Analyse hat immer Vorrang)
+- **Eröffnungs-Repertoire**: Eröffnungen mit Weiß und Schwarz festlegen (aus dem Trainer, als eigene Linie oder vom
+  Analysebrett); die Analyse zeigt, wo du oder dein Gegner davon abgewichen seid
+- **Einstellungen**: helles, dunkles oder automatisches Design (wie das System), 11 Brettfarben, 9 Figurensätze,
+  Brettgröße, Notation (deutsch, englisch, Figuren), Strenge der Bewertung, Zahl der Engine-Linien, Farben für
+  Farbenblinde, Lautstärke, Animationen
 - **Offline nutzbar** und als App installierbar (Service Worker); einmal geladene Dateien kommen aus dem Gerätespeicher
 - **Jeder Zug bewertet**: Brillant, Großartig, Bester Zug, Ausgezeichnet, Gut, Buchzug, Ungenauigkeit, Fehler, Verpasste Chance, Patzer
 - **Bewertungsleiste**, Genauigkeit für beide Seiten, Bewertungsdiagramm, Eröffnungsname
@@ -57,8 +69,9 @@ Nicht mit Chess.com verbunden. Die komplette Analyse läuft im Browser auf deine
 - **Sicherungs-Code** (im Profil): der komplette Stand als Text zum Kopieren und Einfügen – auch ohne Konto nutzbar.
 - **Abmelden** lädt erst alles hoch und entfernt dann den Stand von diesem Gerät, damit sich Konten nicht vermischen.
 - **Verwaltung** unter `/admin`, geschützt durch das Betreiber-Passwort (mit Notfall-Code zum Zurücksetzen):
-  Konten ansehen, sperren, abmelden, löschen (samt Daten), Übergangs-Passwort vergeben, Registrierung offen /
-  nur mit Einladungscode / geschlossen, Höchstzahl an Konten, Hinweistext für alle.
+  Konten ansehen, sperren, abmelden, löschen (samt Daten), Übergangs-Passwort vergeben, Speicherverbrauch je Konto
+  (auf Knopfdruck), Daten eines Kontos als JSON exportieren, Registrierung offen / nur mit Einladungscode /
+  geschlossen, Höchstzahl an Konten, Hinweistext für alle.
 - Gespeichert werden nur gesalzene Hashes, nie Passwörter – auf Netlify im Blob-Speicher (`auth` für Konten,
   `sync` für die Stände), lokal im Ordner `.data/`.
 - Geschützt sind Seite, Skripte und `/api/*`. Bilder, Stylesheet, Engine und die freien Daten bleiben abrufbar.
@@ -104,6 +117,15 @@ Deshalb holt eine winzige Server-Funktion (`server/proxy.mjs`) die Partie-Daten.
   Wird es trotzdem zu viel, lässt sich die Registrierung in der Verwaltung auf Einladungscode oder „geschlossen“ stellen.
 - Bewusst nicht eingebaut, weil es laufend Kontingent kosten würde: KI-Erklärungen und Überwachung/Alarme.
 
+### Engine-Geschwindigkeit
+
+- Die Partieanalyse rechnet mit mehreren Engines gleichzeitig: 2 auf Handys, bis zu 6 auf PCs mit 8 und mehr Kernen.
+  Jede Engine rechnet zusammenhängende Abschnitte von hinten nach vorn und nutzt so ihre Hash-Tabelle weiter.
+- Die Live-Analyse (eigene Varianten, Analysebrett) nutzt auf PCs mehrere Kerne. Dafür sendet die Seite die Header
+  `Cross-Origin-Opener-Policy: same-origin` und `Cross-Origin-Embedder-Policy: credentialless` (siehe `netlify.toml`).
+  Browser ohne Unterstützung (z. B. Safari) und Handys bekommen automatisch die Einzelkern-Engine; startet die
+  Mehrkern-Engine nicht, wird ebenfalls auf die Einzelkern-Engine umgeschaltet.
+
 ## Tests
 
 ```bash
@@ -111,7 +133,8 @@ npm test
 ```
 
 Prüft alle Lektionen (jede Lösung muss ein legaler Zug sein) und die Kernfunktionen: Links erkennen, Züge dekodieren,
-PGN lesen und schreiben, Zugbewertung, Eröffnungslinien, Konten, Verwaltung und Synchronisierung. Dieselben Tests laufen bei jedem Push
+PGN lesen und schreiben, Zugbewertung, Eröffnungslinien, Konten, Verwaltung, Synchronisierung, Repertoire,
+Teilen-Links mit Analyse, Notizen und Varianten im PGN. Dieselben Tests laufen bei jedem Push
 über GitHub Actions (`.github/workflows/ci.yml`).
 
 ## Grenzen
@@ -147,7 +170,8 @@ js/lessons-more.js    Weiterführende Lektionen
 js/puzzles.js         Taktikaufgaben (Auswahl nach Wertung, Wertungsberechnung, Themenfilter, Sturm, Tagesaufgabe)
 js/play.js            Gegen den Computer spielen, Endspiel-Trainer
 js/training.js        Fehler-Training (Karteikasten-Prinzip)
-js/trainers.js        Koordinaten- und Eröffnungstrainer (Linien in js/openings-data.js)
+js/trainers.js        Koordinaten- und Eröffnungstrainer, Repertoire-Verwaltung (Linien in js/openings-data.js)
+js/repertoire.js      Repertoire speichern und mit einer Partie vergleichen
 js/profile.js         Profil, Schwächenanalyse, Stapelanalyse, Sicherung
 js/insights.js        Zeitmanagement, Fehlerarten, Kurzfassung einer Partie
 js/pgn.js             PGN schreiben, Mehrfach-PGN, Teilen-Link
@@ -171,7 +195,7 @@ vendor/               Stockfish und chess.js
 
 ## Fremde Bestandteile und Lizenzen
 
-- [Stockfish.js](https://github.com/nmrugg/stockfish.js) 19 (Lite, single-threaded) – GPLv3, siehe `vendor/stockfish/COPYING.txt`
+- [Stockfish.js](https://github.com/nmrugg/stockfish.js) 19 (Lite, ein- und mehrkernig) – GPLv3, siehe `vendor/stockfish/COPYING.txt`
 - [chess.js](https://github.com/jhlywa/chess.js) – BSD-2-Clause, siehe `vendor/chess.js.LICENSE`
 - Eröffnungsdaten: [lichess-org/chess-openings](https://github.com/lichess-org/chess-openings) – CC0
 - Taktikaufgaben: Auswahl aus der [Lichess-Aufgabensammlung](https://database.lichess.org/#puzzles) – CC0

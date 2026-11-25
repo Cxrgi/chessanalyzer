@@ -502,7 +502,9 @@ function bindEvents() {
     const b = e.target.closest('.line');
     if (b) playLine(+b.dataset.i);
   });
+  // Pfeil beim Überfahren einer Engine-Linie (nur solange eine Partie bzw. das Analysebrett offen ist)
   $('lines').addEventListener('pointerover', (e) => {
+    if (!S.game || S.view !== 'moves') return;
     const b = e.target.closest('.line');
     const arrow = b ? b.dataset.uci : null;
     if (arrow !== S.hoverArrow) {
@@ -511,10 +513,9 @@ function bindEvents() {
     }
   });
   $('lines').addEventListener('pointerleave', () => {
-    if (S.hoverArrow) {
-      S.hoverArrow = null;
-      renderBoard(false);
-    }
+    if (!S.hoverArrow) return;
+    S.hoverArrow = null;
+    if (S.game && S.view === 'moves') renderBoard(false);
   });
 
   document.addEventListener('keydown', (e) => {
@@ -991,7 +992,7 @@ function leaveModes() {
   leavePlay();
   leaveTraining();
   leaveTrainers();
-  S.game = S.review = S.variation = S.retry = S.annot = null;
+  S.game = S.review = S.variation = S.retry = S.annot = S.hoverArrow = S.threat = null;
 }
 
 /** Startseite mit allen Bereichen. */
