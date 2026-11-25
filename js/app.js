@@ -35,12 +35,22 @@ const THEMES = {
   blue: { name: 'Blau', light: '#dee3e6', dark: '#8ca2ad' },
   grey: { name: 'Grau', light: '#e3e3e3', dark: '#8f8f8f' },
   purple: { name: 'Lila', light: '#ece4f5', dark: '#8f77b5' },
+  sand: { name: 'Sand', light: '#f1e6d0', dark: '#c4a27a' },
+  olive: { name: 'Oliv', light: '#e9e6cc', dark: '#8a8a58' },
+  coral: { name: 'Koralle', light: '#f3e4d8', dark: '#cf866c' },
+  rose: { name: 'Rosa', light: '#f5e3e7', dark: '#c48a9a' },
+  mint: { name: 'Minze', light: '#e4f3ea', dark: '#6aa98a' },
+  night: { name: 'Nacht', light: '#a9b5c5', dark: '#56657a' },
 };
-const PIECE_SETS = { cburnett: 'Klassisch', chessnut: 'Modern', merida: 'Merida' };
+// Freie Figurensätze aus dem Lichess-Projekt (Urheber und Lizenzen: assets/pieces/README.md)
+const PIECE_SETS = {
+  cburnett: 'Klassisch', chessnut: 'Modern', merida: 'Merida', california: 'California', staunty: 'Staunty',
+  maestro: 'Maestro', fantasy: 'Fantasy', spatial: 'Spatial', papercut: 'Papercut',
+};
 const DEPTHS = { 12: 'Schnell', 16: 'Normal', 20: 'Tief' };
 // Weitere Einstellungen: [Schlüssel, Überschrift, Auswahl]
 const OPTIONS = [
-  ['mode', 'Design', { dark: 'Dunkel', light: 'Hell' }],
+  ['mode', 'Design', { dark: 'Dunkel', light: 'Hell', auto: 'Wie das System' }],
   ['size', 'Brettgröße', { small: 'Klein', medium: 'Mittel', auto: 'Groß' }],
   ['notation', 'Schreibweise der Züge', { de: 'Deutsch (S, L, T, D)', en: 'Englisch (N, B, R, Q)', fig: 'Figuren (♘ ♗ ♖ ♕)' }],
   ['strict', 'Bewertung der Züge', { mild: 'Nachsichtig', normal: 'Normal', strict: 'Streng' }],
@@ -101,6 +111,8 @@ const S = {
 
 const live = new LiveEngine();
 const scale = () => STRICTNESS[S.settings.strict] || 1;
+const SYSTEM_LIGHT = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : { matches: false, addEventListener() {} };
+SYSTEM_LIGHT.addEventListener('change', () => { if (S.settings.mode === 'auto') applySettings(); });
 let board;
 let threatEngine = null;
 let drawSettings = () => {};
@@ -237,12 +249,14 @@ function applySettings(byUser = false) {
   setPalette(S.settings.palette === 'safe');
   live.multipv = Math.max(1, +S.settings.lines || 1);
   const root = document.documentElement;
-  root.dataset.mode = S.settings.mode === 'light' ? 'light' : 'dark';
+  // „Wie das System“: folgt der Hell/Dunkel-Einstellung von Handy oder Computer – auch wenn sie sich später ändert
+  const light = S.settings.mode === 'light' || (S.settings.mode === 'auto' && SYSTEM_LIGHT.matches);
+  root.dataset.mode = light ? 'light' : 'dark';
   root.dataset.size = S.settings.size;
   root.classList.toggle('no-motion', !S.settings.anim);
   root.classList.toggle('no-dots', !S.settings.dots);
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.content = S.settings.mode === 'light' ? '#eef1f5' : '#11151b';
+  if (meta) meta.content = light ? '#eef1f5' : '#11151b';
   $('btn-sound').innerHTML = uiIcon(S.settings.sound ? 'sound' : 'mute', 20);
   store.set('settings', S.settings, !byUser);
   if (S.view !== 'home' && S.game) renderPlayers();
