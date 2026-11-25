@@ -119,6 +119,19 @@ test('Verwaltung: nur mit Betreiber-Passwort, Konten sperren und löschen, Regis
 
   const details = await (await handleGate(post('/api/admin/user', { name: 'Anna', action: 'details' }, admin), env)).json();
   assert.deepEqual([details.games, details.hasState], [1, true]);
+  assert.ok(details.bytes > 0 && details.bytes === details.stateBytes + details.gameBytes);
+
+  // Export eines Kontos: Profil, Stand und Partien – aber keine Passwort-Daten
+  const exp = await handleGate(post('/api/admin/user', { name: 'Anna', action: 'export' }, admin), env);
+  assert.match(exp.headers.get('content-disposition'), /chessanalyzer-anna-\d{4}-\d{2}-\d{2}\.json/);
+  const dump = await exp.json();
+  assert.equal(dump.user.name, 'Anna');
+  assert.equal(dump.user.chesscom, 'anna_chess');
+  assert.deepEqual(Object.keys(dump.games), ['live-7']);
+  assert.equal(dump.state.rev, 1);
+  assert.ok(!JSON.stringify(dump).includes('hash') && !JSON.stringify(dump).includes('salt'));
+  // Ohne Betreiber-Anmeldung kein Export
+  assert.equal((await handleGate(post('/api/admin/user', { name: 'Anna', action: 'export' }, a), env)).status, 401);
 
   // Sperren: Anmeldung und Daten-Zugriff sind sofort weg
   await handleGate(post('/api/admin/user', { name: 'Anna', action: 'disable' }, admin), env);

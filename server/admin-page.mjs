@@ -112,9 +112,10 @@ export function adminPage({ nonce = '' } = {}) {
 
   <div class="panel">
     <h2>Konten</h2>
-    <div class="row" style="margin-bottom:10px"><input class="small" id="filter" type="search" placeholder="Suchen …" style="max-width:280px" aria-label="Konten durchsuchen"></div>
+    <div class="row" style="margin-bottom:10px"><input class="small" id="filter" type="search" placeholder="Suchen …" style="max-width:280px" aria-label="Konten durchsuchen">
+      <button class="btn" type="button" id="sizes" title="Liest die gespeicherten Daten aller Konten – nur bei Bedarf">Speicher aller Konten berechnen</button></div>
     <div class="scroll"><table>
-      <thead><tr><th>Benutzer</th><th>Schachkonto</th><th>Erstellt</th><th>Zuletzt aktiv</th><th>Status</th><th>Aktionen</th></tr></thead>
+      <thead><tr><th>Benutzer</th><th>Schachkonto</th><th>Erstellt</th><th>Zuletzt aktiv</th><th>Speicher</th><th>Status</th><th>Aktionen</th></tr></thead>
       <tbody id="rows"></tbody>
     </table></div>
     <p class="muted" id="empty" hidden>Noch keine Konten.</p>
@@ -171,6 +172,15 @@ export function adminPage({ nonce = '' } = {}) {
     token: 'Der Einrichtungs-Code stimmt nicht.', configured: 'Es wurde bereits ein Passwort festgelegt. Bitte lade die Seite neu.', invite: 'Bitte gib einen Einladungscode an.' };
   const REG = { open: 'offen', invite: 'mit Code', closed: 'geschlossen' };
   let users = [];
+  const sizes = {}; // Name → { bytes, games } (nur, wenn berechnet)
+  const kb = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1).replace('.', ',') + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
+  const sizeText = (s) => (s ? kb(s.bytes) + ' · ' + s.games + (s.games === 1 ? ' Partie' : ' Partien') : '–');
+  async function details(name) {
+    const r = await api('user', { name, action: 'details' });
+    if (!r.ok) return null;
+    sizes[name] = r.data;
+    return r.data;
+  }
 
   async function api(action, body) {
     const res = await fetch('/api/admin/' + action, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -227,9 +237,10 @@ export function adminPage({ nonce = '' } = {}) {
     $('rows').innerHTML = list.map((u) => {
       const play = u.site === 'chesscom' ? 'chess.com: ' + esc(u.chesscom) : u.site === 'lichess' ? 'Lichess: ' + esc(u.lichess) : '–';
       const n = esc(u.name);
-      return '<tr><td><b>' + n + '</b></td><td>' + play + '</td><td>' + date(u.created) + '</td><td>' + date(u.seen) + '</td>'
+      return '<tr><td><b>' + n + '</b></td><td>' + play + '</td><td>' + date(u.created) + '</td><td>' + date(u.seen) + '</td><td class="muted">' + sizeText(sizes[u.name]) + '</td>'
         + '<td><span class="tag ' + (u.disabled ? 'off' : '') + '">' + (u.disabled ? 'gesperrt' : 'aktiv') + '</span></td>'
         + '<td class="acts"><button class="btn" data-a="details" data-n="' + n + '">Details</button>'
+        + '<button class="btn" data-a="export" data-n="' + n + '">Exportieren</button>'
         + '<button class="btn" data-a="password" data-n="' + n + '">Neues Passwort</button>'
         + '<button class="btn" data-a="' + (u.disabled ? 'enable' : 'disable') + '" data-n="' + n + '">' + (u.disabled ? 'Entsperren' : 'Sperren') + '</button>'
         + '<button class="btn" data-a="logout" data-n="' + n + '">Abmelden</button>'
@@ -243,9 +254,30 @@ export function adminPage({ nonce = '' } = {}) {
     const name = b.dataset.n, action = b.dataset.a;
     if (action === 'delete' && !confirm('Konto „' + name + '“ mit allen gespeicherten Daten endgültig löschen?')) return;
     if (action === 'password' && !confirm('Für „' + name + '“ ein neues Übergangs-Passwort erzeugen? Das alte gilt dann nicht mehr.')) return;
+    if (action === 'export') {
+      say('m-users', 'Export wird erstellt …');
+      const res = await fetch('/api/admin/user', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, action: 'export' }) }).catch(() => null);
+      if (!res || !res.ok) return say('m-users', 'Der Export hat nicht geklappt.', true);
+      const blob = await res.blob();
+      const file = ((res.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/) || [])[1] || 'export.json';
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = file;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      return say('m-users', 'Export von ' + name + ' heruntergeladen (' + kb(blob.size) + ').');
+    }
+    if (action === 'details') {
+      const s = await details(name);
+      if (!s) return say('m-users', 'Das hat nicht geklappt.', true);
+      draw();
+      return say('m-users', name + ': ' + (s.games === 1 ? '1 analysierte Partie' : s.games + ' analysierte Partien') + ', zusammen ' + kb(s.bytes)
+        + (s.hasState ? ' (davon Fortschritt und Einstellungen ' + kb(s.stateBytes) + ').' : ' – noch kein Fortschritt gespeichert.'));
+    }
     const r = await api('user', { name, action });
     if (!r.ok) return say('m-users', 'Das hat nicht geklappt.', true);
-    if (action === 'details') return say('m-users', name + ': ' + (r.data.games === 1 ? '1 analysierte Partie' : r.data.games + ' analysierte Partien') + ' gespeichert' + (r.data.hasState ? ', Fortschritt vorhanden.' : ', noch kein Fortschritt.'));
     if (action === 'password') say('m-users', 'Neues Passwort für ' + name + ': ' + r.data.password + ' – gib es der Person weiter, sie kann es danach selbst ändern.');
     else say('m-users', { delete: 'Konto gelöscht.', disable: 'Konto gesperrt.', enable: 'Konto entsperrt.', logout: 'Auf allen Geräten abgemeldet.' }[action]);
     const keep = $('m-users').textContent;
@@ -253,6 +285,16 @@ export function adminPage({ nonce = '' } = {}) {
     say('m-users', keep);
   });
   $('filter').oninput = draw;
+  $('sizes').onclick = async () => {
+    say('m-users', 'Berechne …');
+    let total = 0;
+    for (const u of users) {
+      const s = await details(u.name);
+      if (s) total += s.bytes;
+      draw();
+    }
+    say('m-users', 'Alle Konten zusammen: ' + kb(total) + '.');
+  };
   $('reload').onclick = dashboard;
   $('logout').onclick = async () => { await api('logout', {}); location.reload(); };
   $('s-save').onclick = async () => {

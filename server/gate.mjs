@@ -436,9 +436,33 @@ async function adminApi(request, url, env) {
     const lname = String(input.name || '').toLowerCase();
     const user = NAME.test(lname) ? await loadUser(kv, lname) : null;
     if (!user) return json({ error: 'not-found' }, 404);
-    if (input.action === 'details') {
+    if (input.action === 'details' || input.action === 'export') {
+      // Nur auf Knopfdruck: liest alle gespeicherten Daten dieses Kontos (Stand + analysierte Partien)
       const keys = env.data && env.data.list ? await env.data.list(lname + '/') : [];
-      return json({ ok: true, games: keys.filter((k) => k.startsWith(lname + '/game/')).length, hasState: keys.includes(lname + '/state') });
+      const texts = new Map();
+      for (let i = 0; i < keys.length; i += 10) {
+        const part = keys.slice(i, i + 10);
+        const got = await Promise.all(part.map((k) => env.data.get(k)));
+        part.forEach((k, j) => { if (got[j] != null) texts.set(k, typeof got[j] === 'string' ? got[j] : JSON.stringify(got[j])); });
+      }
+      const size = (t) => enc.encode(t).length;
+      const state = texts.get(lname + '/state') || null;
+      const games = [...texts].filter(([k]) => k.startsWith(lname + '/game/'));
+      if (input.action === 'details') {
+        const gameBytes = games.reduce((n, [, t]) => n + size(t), 0);
+        const stateBytes = state ? size(state) : 0;
+        return json({ ok: true, games: games.length, hasState: !!state, bytes: stateBytes + gameBytes, stateBytes, gameBytes });
+      }
+      // Export als JSON-Datei. Die gespeicherten Texte werden unverändert eingesetzt (kein erneutes Umwandeln).
+      const profile = { name: user.name, created: user.created, seen: user.seen, site: user.site, chesscom: user.chesscom, lichess: user.lichess, disabled: !!user.disabled };
+      const body = `{"app":"chessanalyzer","export":"konto","exported":${JSON.stringify(new Date().toISOString())},"user":${JSON.stringify(profile)},`
+        + `"state":${state || 'null'},"games":{${games.map(([k, t]) => `${JSON.stringify(k.slice(lname.length + 6))}:${t}`).join(',')}}}`;
+      return new Response(body, {
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store',
+          'Content-Disposition': `attachment; filename="chessanalyzer-${user.lname}-${new Date().toISOString().slice(0, 10)}.json"`,
+        },
+      });
     }
     if (input.action === 'delete') {
       await deleteUserData(env, lname);
