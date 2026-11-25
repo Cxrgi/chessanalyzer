@@ -665,6 +665,7 @@ function reportLoadError(e) {
 async function showRecentGames(username, months = 2) {
   const site = S.site === 'lichess' ? 'Lichess' : 'chess.com';
   setStatus(`Lade die letzten Partien von ${username} (${site}) …`, 'busy');
+  $('games-card').hidden = true; // keine alte Liste stehen lassen, falls das Laden scheitert
   try {
     const entries = S.site === 'lichess' ? await fetchLichessGames(username, months * 30) : await fetchRecentGames(username, { months, limit: months * 60 });
     setStatus('');
