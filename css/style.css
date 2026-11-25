@@ -702,3 +702,18 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 #progress-live[hidden] { display: none; }
 .progress-graph { cursor: default; }
 .progress-stats { margin: 0; font-size: .93rem; }
+
+/* ---- Eigene Varianten und Notizen ---------------------------------------- */
+.var-row { display: flex; align-items: center; gap: 4px; padding: 1px 8px 3px 40px; }
+.var-open { flex: 1; min-width: 0; text-align: left; background: none; border: 0; padding: 3px 6px; border-radius: 6px; color: #9ec3e6; font-size: .86rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.var-open:hover { background: rgba(92, 139, 176, .16); }
+.var-row.active .var-open { background: rgba(92, 139, 176, .28); color: var(--text); }
+.var-del { background: none; border: 0; color: var(--muted); font-size: 1.05rem; line-height: 1; padding: 2px 6px; border-radius: 6px; }
+.var-del:hover { color: var(--danger); background: rgba(250, 90, 72, .1); }
+.moves.only-bad .var-row { display: none; }
+.note-dot { width: 7px; height: 7px; border-radius: 50%; background: #f7a531; flex: none; }
+.note-box { flex: none; }
+.note-box textarea { width: 100%; background: var(--bg-2); color: var(--text); border: 1px solid var(--line); border-radius: 9px; padding: 7px 10px; font: inherit; font-size: .9rem; resize: vertical; }
+.note-box textarea:focus { outline: none; border-color: #f7a531; }
+.variation #v-save, .variation .v-saved { flex: none; font-size: .8rem; padding: 3px 10px; }
+:root[data-mode="light"] .var-open { color: #2f6690; }

@@ -48,6 +48,7 @@ export async function collect() {
   }
   for (const e of await db.all('meta').catch(() => [])) state.meta[e.key] = e.value;
   for (const e of await db.all('cards').catch(() => [])) state.cards[e.key] = e.value;
+  for (const e of await db.all('notes').catch(() => [])) state.notes[e.key] = e.value;
   state.del = { ...b.del };
   return state;
 }
@@ -62,7 +63,7 @@ async function apply(merged, local) {
   }
   b.del = { ...merged.del };
   saveBook(b);
-  for (const [store, kind] of [['meta', 'g:'], ['cards', 'c:']]) {
+  for (const [store, kind] of [['meta', 'g:'], ['cards', 'c:'], ['notes', 'n:']]) {
     const fresh = Object.entries(merged[store]).filter(([id, v]) => JSON.stringify(local[store][id]) !== JSON.stringify(v));
     if (fresh.length) await db.setMany(store, fresh);
     for (const id of Object.keys(local[store])) {

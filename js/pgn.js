@@ -1,5 +1,6 @@
 // PGN schreiben (auch mit Bewertungen und Uhrzeiten), mehrere Partien aus einer Datei trennen
 // und Partien für einen Teilen-Link packen.
+import { Chess } from '../vendor/chess.js';
 const NAG = { brilliant: '!!', great: '!', inaccuracy: '?!', mistake: '?', miss: '?', blunder: '??' };
 const START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
@@ -9,11 +10,34 @@ const clk = (sec) => {
 };
 const evalTag = (ev) => (ev.type === 'mate' ? (ev.value === 0 ? null : `#${ev.value}`) : (ev.value / 100).toFixed(2));
 
+/** Zugfolge (UCI) ab einer Stellung als PGN-Text mit Zugnummern, z. B. „4... Bxf3 5. Qxf3“. */
+function lineSan(fen, ucis) {
+  const chess = new Chess(fen);
+  let num = +fen.split(' ')[5] || 1;
+  let out = '';
+  ucis.forEach((uci, i) => {
+    let m;
+    try {
+      m = chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] });
+    } catch (e) {
+      return;
+    }
+    if (m.color === 'w') out += `${num}. `;
+    else if (i === 0) out += `${num}... `;
+    out += m.san + ' ';
+    if (m.color === 'b') num++;
+  });
+  return out.trim();
+}
+
+const commentText = (t) => String(t).replace(/[{}]/g, (c) => (c === '{' ? '(' : ')')).replace(/\s+/g, ' ').trim();
+
 /**
  * @param game    Partie
  * @param review  optional: Analyse – dann mit Zugbewertungen (!!, ?, ??), [%eval] und [%clk]
+ * @param annot   optional: eigene Notizen (als Kommentare) und gespeicherte Varianten (als Nebenvarianten)
  */
-export function buildPgn(game, review = null) {
+export function buildPgn(game, review = null, annot = null) {
   const head = [
     ['Event', game.url && /lichess/.test(game.url) ? 'Lichess' : game.url ? 'Chess.com' : 'Partie'],
     ['Site', game.url || '?'],
@@ -33,6 +57,9 @@ export function buildPgn(game, review = null) {
   let white = parts[1] === 'w';
   let body = '';
   let needNumber = true;
+  const notes = (annot && annot.notes) || {};
+  const lines = (annot && annot.lines) || [];
+  if (notes[0]) body += `{ ${commentText(notes[0])} } `;
   game.moves.forEach((m, k) => {
     if (white) body += `${num}. `;
     else if (needNumber) body += `${num}... `;
@@ -43,11 +70,27 @@ export function buildPgn(game, review = null) {
       if (e) tags.push(`[%eval ${e}]`);
     }
     if (m.clock != null) tags.push(`[%clk ${clk(m.clock)}]`);
+    if (notes[k + 1]) tags.push(commentText(notes[k + 1]));
     needNumber = tags.length > 0;
     if (tags.length) body += `{ ${tags.join(' ')} } `;
+    // Gespeicherte Varianten, die diesen Zug ersetzen, stehen als Nebenvariante direkt dahinter
+    for (const line of lines) {
+      if (line.base !== k || !game.fens || !game.fens[k]) continue;
+      const text = lineSan(game.fens[k], line.ucis);
+      if (text) {
+        body += `(${text}) `;
+        needNumber = true;
+      }
+    }
     if (!white) num++;
     white = !white;
   });
+  // Varianten ab der Schlussstellung lassen sich in PGN nicht als Nebenvariante schreiben – als Kommentar anhängen
+  for (const line of lines) {
+    if (line.base !== game.moves.length || !game.fens) continue;
+    const text = lineSan(game.fens[line.base], line.ucis);
+    if (text) body += `{ Variante: ${text} } `;
+  }
   return head.map(([k, v]) => `[${k} "${String(v).replace(/"/g, "'")}"]`).join('\n') + '\n\n' + body + (game.result || '*') + '\n';
 }
 

@@ -194,6 +194,10 @@
           <button type="button" class="chip" id="mt-bad" title="Nur Züge mit Fehlern zeigen (X)">Nur Fehler</button>
           <button type="button" class="chip" id="mt-threat" title="Was droht, wenn nichts passiert? (D)">Drohung zeigen</button>
           <button type="button" class="chip" id="mt-deep" title="Diese Stellung gründlicher berechnen">Tiefer rechnen</button>
+          <button type="button" class="chip" id="mt-note" title="Eigene Notiz zu dieser Stellung">Notiz</button>
+        </div>
+        <div class="note-box" id="note-box" hidden>
+          <textarea id="note-text" rows="2" maxlength="1000" placeholder="Deine Notiz zu dieser Stellung … (wird automatisch gespeichert)" aria-label="Notiz zu dieser Stellung"></textarea>
         </div>
         <p class="mv-note" id="mv-note" hidden></p>
         <div class="moves" id="moves" tabindex="-1" role="group" aria-label="Zugliste"></div>

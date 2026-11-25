@@ -5,7 +5,8 @@
 //   keys:  { name: { v: Wert, at: Zeitstempel der letzten Änderung } },   // Einstellungen, Aufgaben-Wertung, Lektionen …
 //   meta:  { id: Kurzfassung einer analysierten Partie },
 //   cards: { id: Trainingskarte },
-//   del:   { 'g:<Partie>' | 'c:<Karte>': Zeitstempel } }                   // Gelöschtes, damit es nicht wieder auftaucht
+//   notes: { Partie-id: { id, mod, notes: { Halbzug: Text }, lines: [{ id, base, ucis }] } },  // eigene Notizen und Varianten
+//   del:   { 'g:<Partie>' | 'c:<Karte>' | 'n:<Partie>': Zeitstempel } }    // Gelöschtes, damit es nicht wieder auftaucht
 const DAY = 86400000;
 const KEEP_DELETED = 180 * DAY;
 
@@ -19,7 +20,7 @@ export function stable(x) {
   return JSON.stringify(x === undefined ? null : x);
 }
 
-export const emptyState = () => ({ v: 1, keys: {}, meta: {}, cards: {}, del: {} });
+export const emptyState = () => ({ v: 1, keys: {}, meta: {}, cards: {}, notes: {}, del: {} });
 
 /** Zahlen je Tag und Art: der größere Wert gewinnt (Aktivität lässt sich nicht „zurücknehmen“). */
 function mergeDays(a, b) {
@@ -89,6 +90,11 @@ export function mergeStates(a, b, now = Date.now()) {
     const pick = !x ? y : !y ? x : stamp(x) >= stamp(y) ? x : y;
     // Gelöscht bleibt gelöscht – außer die Partie wurde danach neu analysiert.
     if ((out.del['g:' + id] || 0) < (pick.at || 0)) out.meta[id] = pick;
+  }
+  for (const id of new Set([...Object.keys(a.notes), ...Object.keys(b.notes)])) {
+    const x = a.notes[id], y = b.notes[id];
+    const pick = !x ? y : !y ? x : (x.mod || 0) >= (y.mod || 0) ? x : y;
+    if ((out.del['n:' + id] || 0) < (pick.mod || 0)) out.notes[id] = pick;
   }
   for (const id of new Set([...Object.keys(a.cards), ...Object.keys(b.cards)])) {
     if (out.del['c:' + id]) continue;

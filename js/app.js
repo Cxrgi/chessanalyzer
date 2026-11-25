@@ -156,7 +156,14 @@ function afterSync() {
     renderHistory();
     renderHub();
   } else if (S.view === 'profile') renderProfile();
-  else if (S.mode === 'game' && S.review) refreshAfterSettings();
+  else if (S.mode === 'game' && S.review) {
+    const game = S.game;
+    loadAnnot(game).then((a) => {
+      if (S.game !== game) return;
+      S.annot = a;
+      refreshAfterSettings();
+    });
+  }
 }
 
 /**
@@ -402,7 +409,7 @@ function bindEvents() {
     if (!b || !S.review) return;
     const act = b.dataset.act;
     if (act === 'summary') copyText(summaryText(), b);
-    else if (act === 'pgn') download(new Blob([buildPgn(S.game, S.review)], { type: 'application/x-chess-pgn' }), `${S.game.white.name}-${S.game.black.name}.pgn`.replace(/[^\w.-]+/g, '_'));
+    else if (act === 'pgn') download(new Blob([buildPgn(S.game, S.review, S.annot)], { type: 'application/x-chess-pgn' }), `${S.game.white.name}-${S.game.black.name}.pgn`.replace(/[^\w.-]+/g, '_'));
     else if (act === 'share') copyText(`${location.origin}${location.pathname}#pgn=${await packPgn(buildPgn(S.game))}`, b);
     else if (act === 'png') boardPng();
   });
@@ -412,6 +419,16 @@ function bindEvents() {
   });
 
   $('moves').addEventListener('click', (e) => {
+    const del = e.target.closest('.var-del');
+    if (del) {
+      deleteSavedLine(del.closest('.var-row').dataset.line);
+      return;
+    }
+    const open = e.target.closest('.var-open');
+    if (open) {
+      openSavedLine(open.closest('.var-row').dataset.line);
+      return;
+    }
     const b = e.target.closest('.mv');
     if (!b) return;
     if (S.mode === 'board') boardGo(+b.dataset.ply);
@@ -490,6 +507,23 @@ function bindEvents() {
     else prev();
   }, { passive: false });
   $('mt-bad').onclick = toggleOnlyBad;
+  $('variation').addEventListener('click', (e) => { if (e.target.closest('#v-save')) saveVariation(); });
+  $('mt-note').onclick = () => {
+    S.noteOpen = S.noteOpen === S.ply ? null : S.ply;
+    renderTools();
+    if (!$('note-box').hidden) $('note-text').focus();
+  };
+  let noteTimer = null;
+  $('note-text').addEventListener('input', () => {
+    const ply = S.ply;
+    const game = S.game;
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(() => { if (S.game === game) setNote(ply, $('note-text').value); }, 500);
+  });
+  $('note-text').addEventListener('blur', () => {
+    clearTimeout(noteTimer);
+    if (S.mode === 'game' && !S.variation) setNote(S.ply, $('note-text').value);
+  });
   $('mt-threat').onclick = showThreat;
   $('mt-deep').onclick = deepen;
   for (const id of ['graph-overview', 'graph-moves']) {
@@ -724,6 +758,10 @@ async function renderHistory() {
     } else if (del) {
       await Promise.all([db.del('meta', del.dataset.del), db.del('games', del.dataset.del)]);
       forget('g', del.dataset.del);
+      if (await db.get('notes', del.dataset.del).catch(() => null)) {
+        await db.del('notes', del.dataset.del).catch(() => {});
+        forget('n', del.dataset.del);
+      }
       renderHistory();
     } else if (e.target.closest('[data-more]')) {
       S.historyAll = true;
@@ -881,7 +919,7 @@ function leaveModes() {
   leavePlay();
   leaveTraining();
   leaveTrainers();
-  S.game = S.review = S.variation = S.retry = null;
+  S.game = S.review = S.variation = S.retry = S.annot = null;
 }
 
 /** Startseite mit allen Bereichen. */
@@ -1349,6 +1387,10 @@ async function startGame(game, cached) {
   // Remis durch Stellungswiederholung oder 50-Züge-Regel: Die Schlussstellung ist remis, egal was die Engine meint
   if (game.drawn) positions[positions.length - 1] = { lines: [], eval: { type: 'cp', value: 0 }, terminal: 'draw' };
   if (S.game !== game) return;
+  const annot = await loadAnnot(game);
+  if (S.game !== game) return;
+  S.annot = annot;
+  S.noteOpen = null;
   S.book = book;
   S.review = reviewGame(game, positions, book, scale());
   buildMoveList();
@@ -1693,6 +1735,14 @@ function renderTools() {
   const t = S.threat && S.threat.fen === currentFen() ? S.threat : null;
   if (!t) S.threat = null;
   $('mt-threat').classList.toggle('on', !!t);
+  // Notiz zur aktuellen Stellung (nur in der Partie selbst, nicht in Varianten)
+  const canNote = game && !S.variation && !S.retry && !!S.annot && S.view === 'moves';
+  const note = canNote ? S.annot.notes[S.ply] || '' : '';
+  const noteOpen = canNote && (!!note || S.noteOpen === S.ply);
+  $('mt-note').hidden = !canNote;
+  $('mt-note').classList.toggle('on', noteOpen);
+  $('note-box').hidden = !noteOpen;
+  if (noteOpen && document.activeElement !== $('note-text')) $('note-text').value = note;
   $('mv-note').hidden = !t;
   $('mv-note').innerHTML = t ? (t.busy ? '<span class="spinner"></span> ' : '') + md(t.text) : '';
 }
@@ -1777,6 +1827,11 @@ function onUserMove({ from, to, promotion }) {
     S.variation = { basePly: S.ply, returnPly: S.ply, moves: [], idx: 0, source: 'user', evals: [S.review.evals[S.ply]], lines: [], judged: [] };
   }
   const cur = S.variation;
+  if (cur.source === 'why') {
+    // Eigener Zug während „Zeig mir warum“: Vorspielen anhalten, ab hier ist es eine eigene Variante
+    cur.paused = true;
+    clearTimeout(whyTimer);
+  }
   if (cur.source !== 'board') cur.source = 'user';
   cur.moves.length = cur.idx;
   cur.evals.length = cur.idx + 1;
@@ -2438,7 +2493,97 @@ function renderVariationBar() {
   const shown = lineText(fen, v.moves.slice(0, v.idx));
   const rest = v.moves.length > v.idx ? ' ' + v.moves.slice(v.idx, v.idx + 4).map((m) => sanDe(m.san)).join(' ') : '';
   el.hidden = false;
-  el.innerHTML = `<div class="v-moves"><b>${esc(shown)}</b><span>${esc(rest)}</span></div>`;
+  const line = v.savedId && S.annot ? S.annot.lines.find((l) => l.id === v.savedId) : null;
+  const same = line && line.ucis.join(' ') === v.moves.map((m) => m.uci).join(' ');
+  const button = !S.annot || !v.moves.length ? ''
+    : same ? '<span class="chip on v-saved">Gespeichert ✓</span>'
+      : `<button type="button" class="chip" id="v-save">${line ? 'Änderung speichern' : 'Variante speichern'}</button>`;
+  el.innerHTML = `<div class="v-moves"><b>${esc(shown)}</b><span>${esc(rest)}</span></div>${button}`;
+}
+
+// ---------------------------------------------------------------------------
+// Eigene Varianten und Notizen zu einer Partie (bleiben gespeichert und werden mit dem Konto abgeglichen)
+// ---------------------------------------------------------------------------
+
+const MAX_LINES = 50;
+const MAX_LINE_PLIES = 60;
+
+async function loadAnnot(game) {
+  const a = await db.get('notes', game.id).catch(() => null);
+  return a && a.notes && a.lines ? a : { id: game.id, notes: {}, lines: [] };
+}
+
+async function saveAnnot() {
+  const a = S.annot;
+  if (!a) return;
+  a.mod = Date.now();
+  if (!a.lines.length && !Object.keys(a.notes).length) {
+    await db.del('notes', a.id).catch(() => {});
+    forget('n', a.id);
+  } else {
+    await db.set('notes', a.id, a).catch(() => {});
+    touch();
+  }
+}
+
+function saveVariation() {
+  const v = S.variation;
+  if (!v || v.source !== 'user' || !v.moves.length || !S.annot || S.mode !== 'game') return;
+  const a = S.annot;
+  const ucis = v.moves.slice(0, MAX_LINE_PLIES).map((m) => m.uci);
+  let line = v.savedId ? a.lines.find((l) => l.id === v.savedId) : null;
+  if (!line) line = a.lines.find((l) => l.base === v.basePly && l.ucis.join(' ') === ucis.join(' '));
+  if (line) line.ucis = ucis;
+  else {
+    if (a.lines.length >= MAX_LINES) {
+      $('variation').insertAdjacentHTML('beforeend', '<span class="hint">Höchstens 50 Varianten pro Partie.</span>');
+      return;
+    }
+    line = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), base: v.basePly, ucis };
+    a.lines.push(line);
+  }
+  v.savedId = line.id;
+  saveAnnot();
+  buildMoveList();
+  render();
+}
+
+function openSavedLine(id) {
+  const line = S.annot && S.annot.lines.find((l) => l.id === id);
+  if (!line) return;
+  if (S.view !== 'moves') showMoves();
+  const moves = pvToMoves(S.game.fens[line.base], line.ucis, MAX_LINE_PLIES);
+  if (!moves.length) return;
+  live.stop();
+  S.retry = null;
+  S.variation = {
+    basePly: line.base, returnPly: line.base, moves, idx: 1, source: 'user', savedId: id,
+    evals: [S.review.evals[line.base]], lines: [], judged: [],
+  };
+  playSound(soundFor(moves[0]));
+  startLive();
+  render();
+}
+
+function deleteSavedLine(id) {
+  if (!S.annot || !confirm('Diese Variante löschen?')) return;
+  S.annot.lines = S.annot.lines.filter((l) => l.id !== id);
+  if (S.variation && S.variation.savedId === id) S.variation.savedId = null;
+  saveAnnot();
+  buildMoveList();
+  render();
+}
+
+/** Notiz zur Stellung nach Halbzug ply (0 = vor dem ersten Zug). Leerer Text löscht sie. */
+function setNote(ply, text) {
+  if (!S.annot) return;
+  const clean = String(text || '').slice(0, 1000).trim();
+  if ((S.annot.notes[ply] || '') === clean) return;
+  if (clean) S.annot.notes[ply] = clean;
+  else delete S.annot.notes[ply];
+  saveAnnot();
+  buildMoveList();
+  highlightMove();
 }
 
 function buildMoveList() {
@@ -2452,25 +2597,38 @@ function buildMoveList() {
   const cell = (k) => {
     const m = game.moves[k];
     const t = spent && spent[k] != null ? `<em class="clk" title="Bedenkzeit für diesen Zug">${fmt(spent[k])}</em>` : '';
-    return `<button type="button" class="mv${isBad(k) ? ' bad' : ''}" data-ply="${k + 1}">${classIcon(review.moves[k].cls, 16)}<span>${esc(sanDe(m.san))}</span>${t}</button>`;
+    const note = S.annot && S.annot.notes[k + 1] ? '<i class="note-dot" title="Notiz"></i>' : '';
+    return `<button type="button" class="mv${isBad(k) ? ' bad' : ''}" data-ply="${k + 1}">${classIcon(review.moves[k].cls, 16)}<span>${esc(sanDe(m.san))}</span>${note}${t}</button>`;
   };
+  // Gespeicherte Varianten stehen unter der Zeile mit dem Zug, den sie ersetzen
+  const saved = (S.annot && S.annot.lines) || [];
+  const varRows = (from, to) => saved.filter((l) => l.base >= from && l.base < to).map((l) => {
+    const moves = pvToMoves(game.fens[l.base], l.ucis, 60);
+    return `<div class="var-row" data-line="${esc(l.id)}"><button type="button" class="var-open" title="Variante ansehen">(${esc(lineText(game.fens[l.base], moves))})</button>`
+      + '<button type="button" class="var-del" title="Variante löschen" aria-label="Variante löschen">×</button></div>';
+  }).join('');
   let k = 0;
   let num = first;
   if (startsBlack) {
-    html += `<div class="move-row${isBad(0) ? ' has-bad' : ''}"><span class="move-num">${num}.</span><span></span>${cell(0)}</div>`;
+    html += `<div class="move-row${isBad(0) ? ' has-bad' : ''}"><span class="move-num">${num}.</span><span></span>${cell(0)}</div>` + varRows(0, 1);
     k = 1;
     num++;
   }
   for (; k < game.moves.length; k += 2, num++) {
-    html += `<div class="move-row${isBad(k) || isBad(k + 1) ? ' has-bad' : ''}"><span class="move-num">${num}.</span>${cell(k)}${k + 1 < game.moves.length ? cell(k + 1) : '<span></span>'}</div>`;
+    html += `<div class="move-row${isBad(k) || isBad(k + 1) ? ' has-bad' : ''}"><span class="move-num">${num}.</span>${cell(k)}${k + 1 < game.moves.length ? cell(k + 1) : '<span></span>'}</div>` + varRows(k, k + 2);
   }
+  html += varRows(game.moves.length, game.moves.length + 1);
   html += `<div class="result-row">${esc(game.result === '*' ? '' : game.result.replace('1/2-1/2', '½–½'))}</div>`;
   $('moves').innerHTML = html;
 }
 
 function highlightMove() {
   const box = $('moves');
-  box.querySelectorAll('.mv.active').forEach((el) => el.classList.remove('active'));
+  box.querySelectorAll('.mv.active, .var-row.active').forEach((el) => el.classList.remove('active'));
+  if (S.variation && S.variation.savedId) {
+    const row = box.querySelector(`.var-row[data-line="${S.variation.savedId}"]`);
+    if (row) row.classList.add('active');
+  }
   const ply = S.mode === 'board' ? S.variation.idx : S.retry ? S.retry.k + 1 : S.variation ? S.variation.returnPly : S.ply;
   const el = box.querySelector(`.mv[data-ply="${ply}"]`);
   if (el) {
