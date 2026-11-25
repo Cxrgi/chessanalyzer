@@ -5,8 +5,7 @@
   directory = "netlify/functions"
 
 # Sicherheits-Header für alle Seiten und Dateien.
-# Bewusst ohne script-src/style-src: Die Seite nutzt Inline-Styles, und Netlify blendet auf dem
-# kostenlosen Tarif ein eigenes Badge mit Inline-Skript ein, das nicht blockiert werden darf.
+# Bewusst ohne script-src/style-src: Die Seite nutzt Inline-Styles und Inline-Skripte (Anmeldeseite, Verwaltung).
 [[headers]]
   for = "/*"
   [headers.values]
@@ -15,6 +14,11 @@
     X-Frame-Options = "DENY"
     Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
     Content-Security-Policy = "base-uri 'self'; object-src 'none'; form-action 'self'"
+    # Macht die Seite „cross-origin isolated“: Erst dann darf die Engine mehrere Prozessorkerne nutzen.
+    # „credentialless“ lässt fremde Bilder (z. B. Profilbilder von chess.com) weiter laden; Browser ohne
+    # Unterstützung ignorieren die Zeile einfach und nutzen die Einzelkern-Engine.
+    Cross-Origin-Opener-Policy = "same-origin"
+    Cross-Origin-Embedder-Policy = "credentialless"
 
 # Der Service Worker muss immer frisch geprüft werden, sonst kommen Updates nicht an.
 [[headers]]

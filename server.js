@@ -91,7 +91,11 @@ const server = http.createServer(async (req, res) => {
   try {
     const file = join(ROOT, rel);
     if (!(await stat(file)).isFile()) throw new Error('kein File');
-    res.writeHead(200, { 'Content-Type': MIME[extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
+    res.writeHead(200, {
+      'Content-Type': MIME[extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache',
+      // wie auf Netlify: Mehrkern-Engine erlauben (siehe netlify.toml)
+      'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'credentialless',
+    });
     res.end(await readFile(file));
   } catch (e) {
     res.writeHead(404, { 'Content-Type': MIME['.txt'] });

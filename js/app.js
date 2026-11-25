@@ -134,7 +134,6 @@ function init() {
   initSync({ onApplied: afterSync, onStatus: () => { if (S.view === 'profile') renderSyncStatus(); } });
   initAccount();
   routeFromHash();
-  watchHostBadge();
   initOffline();
   bindSwipe();
   $('skip-link').onclick = (e) => {
@@ -200,23 +199,6 @@ function bindSwipe() {
     if (Date.now() - start.at < 600 && Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 2) (dx < 0 ? next : prev)();
     start = null;
   }, { passive: true });
-}
-
-/**
- * Manche Hoster blenden unten rechts ein Badge ein. Damit es keine Knöpfe verdeckt,
- * hält die Seite dort genau so viel Platz frei, wie das Badge hoch ist.
- */
-function watchHostBadge() {
-  const apply = () => {
-    const frame = document.getElementById('nl-badge-frame') || document.getElementById('nl-hud-frame');
-    const h = frame ? Math.ceil(frame.getBoundingClientRect().height) : 0;
-    document.documentElement.style.setProperty('--dock', h + 'px');
-  };
-  const obs = new MutationObserver(apply);
-  obs.observe(document.body, { childList: true });
-  obs.observe(document.documentElement, { childList: true });
-  window.addEventListener('resize', apply);
-  apply();
 }
 
 function buildStaticIcons() {
