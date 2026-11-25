@@ -1,6 +1,8 @@
-// Trainer: (1) Koordinaten – Felder auf Zeit finden, (2) Eröffnungen – Hauptvarianten Zug für Zug einüben.
+// Trainer: (1) Koordinaten – Felder auf Zeit finden, (2) Eröffnungen – Hauptvarianten Zug für Zug einüben,
+// (3) Mein Repertoire – festlegen, welche Eröffnungen man spielt.
 import { Chess } from '../vendor/chess.js';
 import { OPENING_GROUPS } from './openings-data.js';
+import { getRepertoire, hasOpening, toggleOpening, addLine, removeLine, parseMoves, MAX_LINES } from './repertoire.js';
 
 const START = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 const GREEN = 'rgba(129, 182, 76, .7)';
@@ -9,7 +11,8 @@ const SIDE = { w: 'Weiß', b: 'Schwarz' };
 const SECONDS = 30;
 
 let d = null; // von der App übergebene Helfer
-const T = { tab: 'coords', token: 0 };
+const T = { tab: 'coords', token: 0, prefill: null };
+const TABS = [['coords', 'Koordinaten', '#trainer'], ['openings', 'Eröffnungen', '#trainer/eroeffnungen'], ['repertoire', 'Mein Repertoire', '#trainer/repertoire']];
 const C = { running: false, side: 'w', target: null, hits: 0, miss: 0, ends: 0, timer: null, last: 0 };
 const O = { item: null, side: 'w', sans: [], idx: 0, chess: null, wrong: 0, status: 'list', slips: 0, demo: false };
 
@@ -20,7 +23,7 @@ export function initTrainers(deps) {
   d = deps;
   d.$('tn-tabs').onclick = (e) => {
     const b = e.target.closest('[data-tab]');
-    if (b) location.hash = b.dataset.tab === 'coords' ? '#trainer' : '#trainer/eroeffnungen';
+    if (b) location.hash = TABS.find((t) => t[0] === b.dataset.tab)[2];
   };
   d.$('tn-body').onclick = onPanelClick;
 }
@@ -34,13 +37,19 @@ export function trainerSummary() {
 
 export function openTrainers(tab = 'coords', id = null) {
   stopAll();
-  T.tab = tab === 'openings' ? 'openings' : 'coords';
-  d.enterTrainerView(T.tab === 'coords' ? 'Koordinaten-Trainer' : 'Eröffnungstrainer');
-  d.$('tn-tabs').innerHTML = [['coords', 'Koordinaten'], ['openings', 'Eröffnungen']].map(([k, name]) =>
+  T.tab = TABS.some((t) => t[0] === tab) ? tab : 'coords';
+  d.enterTrainerView({ coords: 'Koordinaten-Trainer', openings: 'Eröffnungstrainer', repertoire: 'Mein Repertoire' }[T.tab]);
+  d.$('tn-tabs').innerHTML = TABS.map(([k, name]) =>
     `<button type="button" class="chip ${k === T.tab ? 'on' : ''}" data-tab="${k}">${name}</button>`).join('');
   if (T.tab === 'coords') coordsIdle();
+  else if (T.tab === 'repertoire') repertoireView();
   else if (id && allOpenings().some((o) => o.id === id)) startOpening(id);
   else openingList();
+}
+
+/** Vom Analysebrett: Züge (englische SAN) und Farbe für das Formular „Eigene Linie“ vormerken. */
+export function prefillRepertoire(sans, side) {
+  T.prefill = { sans, side };
 }
 
 export function leaveTrainers() {
@@ -58,7 +67,7 @@ function stopAll() {
 }
 
 function onPanelClick(e) {
-  const b = e.target.closest('[data-act], [data-op]');
+  const b = e.target.closest('[data-act], [data-op], [data-rep-del], [data-rep-show]');
   if (!b) return;
   if (b.dataset.op) {
     location.hash = '#trainer/eroeffnungen/' + b.dataset.op;
@@ -71,6 +80,19 @@ function onPanelClick(e) {
   else if (act === 'op-again') startOpening(O.item.id, O.side);
   else if (act === 'op-demo') demoOpening();
   else if (act === 'op-hint') { O.wrong = 2; O.slips++; renderOpening(); }
+  else if (act === 'op-rep') {
+    try {
+      toggleOpening(d.store, O.item, O.side);
+    } catch (err) {
+      d.setCoach({ title: 'Repertoire ist voll', paragraphs: [`Pro Farbe passen höchstens ${MAX_LINES} Linien hinein. Entferne zuerst eine unter „Mein Repertoire“.`] });
+    }
+    renderOpening();
+  } else if (act === 'rep-add') addOwnLine();
+  else if (b.dataset.repDel) {
+    const [side, id] = b.dataset.repDel.split(':');
+    removeLine(d.store, side, id);
+    repertoireView();
+  } else if (b.dataset.repShow) showRepLine(b.dataset.repShow);
 }
 
 // ---------------------------------------------------------------------------
@@ -193,7 +215,7 @@ function openingList() {
   d.$('tn-body').innerHTML = OPENING_GROUPS.map((g) =>
     `<h3 class="tn-group">${d.esc(g.title)}</h3><div class="tn-list">` + g.items.map((o) =>
       `<button type="button" class="tn-op ${done[o.id] ? 'done' : ''}" data-op="${o.id}">
-        <span>${d.esc(o.name)}</span><small>${done[o.id] ? '✓ ' + done[o.id] + '×' : SIDE[o.side]}</small></button>`).join('') + '</div>').join('');
+        <span>${hasOpening(d.store, o.id, 'w') || hasOpening(d.store, o.id, 'b') ? '<i class="rep-star" title="In deinem Repertoire">★</i> ' : ''}${d.esc(o.name)}</span><small>${done[o.id] ? '✓ ' + done[o.id] + '×' : SIDE[o.side]}</small></button>`).join('') + '</div>').join('');
   const n = Object.keys(done).length;
   d.setCoach({
     title: 'Eröffnungstrainer',
@@ -266,6 +288,7 @@ function renderOpening() {
       ${O.status === 'play' && !O.demo ? '<button type="button" class="btn soft small" data-act="op-hint">Zug zeigen</button>' : ''}
       <button type="button" class="btn soft small" data-act="op-demo">Erst vorführen</button>
       <button type="button" class="btn soft small" data-act="op-side">Als ${SIDE[O.side === 'w' ? 'b' : 'w']} üben</button>
+      <button type="button" class="btn ${hasOpening(d.store, o.id, O.side) ? 'primary' : 'soft'} small" data-act="op-rep" title="Legt fest, dass du diese Eröffnung mit ${SIDE[O.side]} spielst">${hasOpening(d.store, o.id, O.side) ? `★ In deinem Repertoire (${SIDE[O.side]})` : `☆ In mein Repertoire (${SIDE[O.side]})`}</button>
       <button type="button" class="btn ghost small" data-act="op-list">Andere Eröffnung</button>
     </div>`;
   if (O.status !== 'play') return;
@@ -348,4 +371,93 @@ export function trainerMove({ from, to, promotion }) {
   d.playSound('error');
   d.board.setPosition(O.chess.fen(), { animate: false });
   renderOpening();
+}
+
+// ---------------------------------------------------------------------------
+// Mein Repertoire
+// ---------------------------------------------------------------------------
+
+/** „e4 e5 Nf3“ → „1. e4 e5 2. Sf3“ in der eingestellten Notation. */
+function numbered(moves) {
+  return String(moves).split(' ').filter(Boolean).map((san, i) => (i % 2 === 0 ? `${i / 2 + 1}. ` : '') + d.san(san)).join(' ');
+}
+
+function repertoireView(msg = '') {
+  O.status = 'list';
+  d.board.setEditor(null);
+  d.board.setInteractive(false);
+  d.board.setOrientation('w');
+  d.board.setPosition(START, { animate: false });
+  d.board.setDecor({});
+  const rep = getRepertoire(d.store);
+  const section = (side) => `<h3 class="tn-group">Mit ${SIDE[side]}</h3>` + (rep[side].length
+    ? '<div class="tn-list">' + rep[side].map((l) => `<div class="rep-line">
+        <button type="button" class="rep-show" data-rep-show="${side}:${d.esc(l.id)}" title="Auf dem Brett zeigen"><b>${d.esc(l.name)}</b><small>${d.esc(numbered(l.moves))}</small></button>
+        ${l.opening ? `<button type="button" class="btn soft small" data-op="${d.esc(l.opening)}">Üben</button>` : ''}
+        <button type="button" class="var-del" data-rep-del="${side}:${d.esc(l.id)}" title="Aus dem Repertoire entfernen" aria-label="Entfernen">×</button></div>`).join('') + '</div>'
+    : '<p class="hint">Noch nichts eingetragen.</p>');
+  const pre = T.prefill;
+  T.prefill = null;
+  d.$('tn-body').innerHTML = section('w') + section('b') + `
+    <h3 class="tn-group">Eigene Linie eintragen</h3>
+    <div class="rep-form">
+      <select id="rep-side" aria-label="Farbe"><option value="w">Ich spiele Weiß</option><option value="b">Ich spiele Schwarz</option></select>
+      <input id="rep-name" type="text" maxlength="60" placeholder="Name, z. B. Mein Londoner System" aria-label="Name der Linie">
+      <textarea id="rep-moves" rows="2" spellcheck="false" placeholder="Züge, z. B. 1. d4 d5 2. Lf4 Sf6 3. e3" aria-label="Züge"></textarea>
+      <button type="button" class="btn primary small" data-act="rep-add">Hinzufügen</button>
+    </div>
+    <p class="hint" id="rep-msg">${d.esc(msg)}</p>`;
+  if (pre) {
+    d.$('rep-side').value = pre.side;
+    d.$('rep-moves').value = numbered(pre.sans.join(' '));
+    d.$('rep-name').focus();
+  }
+  const n = rep.w.length + rep.b.length;
+  d.setCoach({
+    title: 'Mein Repertoire',
+    paragraphs: [
+      'Leg fest, welche Eröffnungen du mit Weiß und mit Schwarz spielst. Bei der Analyse deiner Partien zeigt dir der Coach dann, wo du davon abgewichen bist – oder wo dein Gegner dich aus der Theorie gebracht hat.',
+      n ? `${n === 1 ? 'Eine Linie' : n + ' Linien'} eingetragen. Klick eine Linie an, um sie auf dem Brett zu sehen.`
+        : 'Am schnellsten geht es im Tab „Eröffnungen“: Öffne eine Eröffnung und tippe auf „☆ In mein Repertoire“. Eigene Linien trägst du unten ein oder übernimmst sie vom Analysebrett.',
+    ],
+  });
+}
+
+function addOwnLine() {
+  const side = d.$('rep-side').value === 'b' ? 'b' : 'w';
+  const parsed = parseMoves(d.$('rep-moves').value);
+  const msg = d.$('rep-msg');
+  if (parsed.error === 'empty') {
+    msg.textContent = 'Trag zuerst ein paar Züge ein, z. B. „1. e4 e5 2. Sf3“.';
+    return;
+  }
+  if (parsed.error) {
+    msg.textContent = `Der ${parsed.at}. Halbzug („${parsed.token}“) passt nicht – ist er in dieser Stellung erlaubt?`;
+    return;
+  }
+  try {
+    const added = addLine(d.store, side, d.$('rep-name').value.trim(), parsed.sans);
+    repertoireView(added ? 'Hinzugefügt.' : 'Diese Linie steht schon in deinem Repertoire.');
+  } catch (e) {
+    msg.textContent = `Pro Farbe passen höchstens ${MAX_LINES} Linien hinein.`;
+  }
+}
+
+function showRepLine(key) {
+  const [side, id] = key.split(':');
+  const line = getRepertoire(d.store)[side].find((l) => l.id === id);
+  if (!line) return;
+  const chess = new Chess();
+  let last = null;
+  for (const san of line.moves.split(' ')) {
+    try {
+      last = chess.move(san);
+    } catch (e) {
+      break;
+    }
+  }
+  d.board.setOrientation(side);
+  d.board.setPosition(chess.fen());
+  d.board.setDecor(last ? { squares: [{ square: last.from, color: 'rgba(255, 235, 59, .5)' }, { square: last.to, color: 'rgba(255, 235, 59, .5)' }] } : {});
+  d.$('tn-body').querySelectorAll('.rep-line').forEach((el) => el.classList.toggle('on', el.querySelector('[data-rep-show]').dataset.repShow === key));
 }

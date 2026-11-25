@@ -5,7 +5,8 @@ import { initPuzzles, openPuzzles, puzzleTargets, puzzleMove, puzzleKey, puzzleS
 import { initTraining, openTraining, trainingTargets, trainingMove, trainingKey, trainingSummary, leaveTraining } from './training.js';
 import { initProfile, renderProfile, renderSyncStatus, dayStreak, TAGS } from './profile.js';
 import { initPlay, openPlay, playTargets, playMove, leavePlay } from './play.js';
-import { initTrainers, openTrainers, trainerTargets, trainerMove, trainerSummary, leaveTrainers } from './trainers.js';
+import { initTrainers, openTrainers, trainerTargets, trainerMove, trainerSummary, leaveTrainers, prefillRepertoire } from './trainers.js';
+import { getRepertoire, checkRepertoire } from './repertoire.js';
 import { initLessons, renderLessonList, openLesson, lessonTargets, lessonMove, lessonKey, lessonProgress } from './lessons.js';
 import { Board } from './board.js';
 import { AnalysisPool, LiveEngine, EnginePlayer, warmEngine, terminalEval } from './engine.js';
@@ -407,6 +408,16 @@ function bindEvents() {
   $('bt-reset').onclick = () => openBoard(START_FEN);
   $('bt-fen').onclick = (e) => copyText(currentFen(), e.currentTarget);
   $('bt-pgn').onclick = (e) => copyText(boardPgn(), e.currentTarget);
+  $('bt-rep').onclick = () => {
+    // Linie vom Analysebrett ins Repertoire-Formular übernehmen (nur aus der Grundstellung sinnvoll)
+    const v = S.variation;
+    if (!v || S.game.startFen !== START_FEN || !v.idx) {
+      setCoach({ title: 'Erst ein paar Züge aus der Grundstellung', paragraphs: ['Spiel die Linie aus der Grundstellung auf dem Brett, dann kannst du sie ins Repertoire übernehmen.'] });
+      return;
+    }
+    prefillRepertoire(v.moves.slice(0, v.idx).map((m) => m.san), S.orientation);
+    location.hash = '#trainer/repertoire';
+  };
   $('bt-arrow').checked = store.get('boardArrow', true);
   $('bt-arrow').onchange = (e) => {
     store.set('boardArrow', e.target.checked);
@@ -439,6 +450,10 @@ function bindEvents() {
       copyText(full.length <= 60000 ? full : `${location.origin}${location.pathname}#pgn=${await packPgn(buildPgn(S.game))}`, b);
     }
     else if (act === 'png') boardPng();
+  });
+  $('rep-box').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-rep-ply]');
+    if (b) { showMoves(); go(+b.dataset.repPly); }
   });
   $('moments').addEventListener('click', (e) => {
     const b = e.target.closest('.moment');
@@ -872,7 +887,7 @@ async function routeFromHash() {
   if (id === 'trainer' || id.startsWith('trainer/')) {
     const [, tab, op] = id.split('/');
     leaveModes();
-    openTrainers(tab === 'eroeffnungen' ? 'openings' : 'coords', op);
+    openTrainers(tab === 'eroeffnungen' ? 'openings' : tab === 'repertoire' ? 'repertoire' : 'coords', op);
     return;
   }
   if (id === 'spielen') {
@@ -1609,6 +1624,7 @@ async function startGame(game, cached) {
   S.noteOpen = null;
   S.book = book;
   S.rawPositions = positions; // unverändert – für erneutes Bewerten (Strenge) und den Teilen-Link
+  S.rep = checkRepertoire(game, S.you, getRepertoire(store));
   S.analysisDepth = (cached && cached.depth) || S.settings.depth;
   S.review = reviewGame(game, positions, book, scale());
   buildMoveList();
@@ -1676,6 +1692,7 @@ function setYou(color) {
   S.orientation = color;
   board.setOrientation(color);
   S.review.diag = null;
+  S.rep = checkRepertoire(S.game, S.you, getRepertoire(store));
   showOverview();
   db.get('games', S.game.id).then((g) => g && saveGame(ctx(), g.positions, g.depth)).catch(() => {});
 }
@@ -1718,6 +1735,7 @@ function renderOverview() {
     `<button type="button" class="moment" data-ply="${m.ply}">${classIcon(m.cls, 18)}<b>${esc(m.label)}</b><span>${CLASSES[m.cls].label}</span></button>`).join('')}</div>` : '';
   $('tips').innerHTML = sum.tips.map((t) =>
     `<h3>${S.you ? esc(t.who) : 'Lernpunkte · ' + esc(t.who)}</h3><ul class="tip-list">${t.items.map((i) => `<li>${esc(i)}</li>`).join('')}</ul>`).join('');
+  renderRepBox();
   const op = review.opening ? review.opening.name : game.openingHint;
   $('opening-line').innerHTML = (op ? `Eröffnung: <b>${esc(op)}</b>` : '')
     + (game.date ? `${op ? ' · ' : ''}${esc(game.date.split('-').reverse().join('.'))}` : '')
@@ -2672,6 +2690,7 @@ function renderCoach() {
     if (tag && tag.lesson) actions.push({ label: 'Lektion dazu', icon: 'book', run: () => { location.hash = '#lektion/' + tag.lesson; } });
   }
   const paragraphs = ex.paragraphs.slice();
+  if (S.rep && S.rep.ply === k && S.rep.type !== 'complete') paragraphs.push(repText(S.rep));
   if (S.ply === n) {
     const res = resultText(game);
     if (res && review.positions[n].terminal !== 'mate') paragraphs.push(res);
@@ -2718,6 +2737,40 @@ function renderVariationBar() {
     : same ? '<span class="chip on v-saved">Gespeichert ✓</span>'
       : `<button type="button" class="chip" id="v-save">${line ? 'Änderung speichern' : 'Variante speichern'}</button>`;
   el.innerHTML = `<div class="v-moves"><b>${esc(shown)}</b><span>${esc(rest)}</span></div>${button}`;
+}
+
+// ---------------------------------------------------------------------------
+// Repertoire: Wo hat die Partie die eigenen Eröffnungslinien verlassen?
+// ---------------------------------------------------------------------------
+
+const plyLabel = (ply, san) => `${Math.floor(ply / 2) + 1}${ply % 2 === 0 ? '.' : '…'} ${sanDe(san)}`;
+
+function repText(r) {
+  const names = r.names.join(' / ');
+  const expected = r.expected.map((san) => `**${plyLabel(r.ply, san)}**`).join(' oder ');
+  if (r.type === 'you') return `Hier bist du von deinem Repertoire (${names}) abgewichen: Gespielt hast du **${plyLabel(r.ply, r.played)}**, vorgesehen war ${expected}.`;
+  if (r.type === 'opp') return `Hier hat dein Gegner dein Repertoire (${names}) verlassen: **${plyLabel(r.ply, r.played)}** statt ${expected}. Ab hier warst du auf dich gestellt.`;
+  return `Du hast deine Repertoire-Linie (${names}) vollständig gespielt – ${r.depth} Halbzüge lang.`;
+}
+
+function renderRepBox() {
+  const box = $('rep-box');
+  const r = S.rep;
+  if (!S.you) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  if (!r) {
+    const empty = !getRepertoire(store)[S.you].length;
+    box.innerHTML = empty
+      ? `<h3>Dein Repertoire</h3><p class="hint">Leg im Trainer fest, welche Eröffnungen du mit ${SIDE[S.you]} spielst – dann siehst du hier, wo du davon abgewichen bist. <a href="#trainer/repertoire">Repertoire anlegen</a></p>`
+      : '';
+    box.hidden = !empty;
+    return;
+  }
+  const jump = r.type !== 'complete' ? `<button type="button" class="btn soft small" data-rep-ply="${r.ply + 1}">Zur Stelle</button>` : '';
+  box.innerHTML = `<h3>Dein Repertoire</h3><p>${md(repText(r))}</p>${jump}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -2817,7 +2870,9 @@ function buildMoveList() {
     const m = game.moves[k];
     const t = spent && spent[k] != null ? `<em class="clk" title="Bedenkzeit für diesen Zug">${fmt(spent[k])}</em>` : '';
     const note = S.annot && S.annot.notes[k + 1] ? '<i class="note-dot" title="Notiz"></i>' : '';
-    return `<button type="button" class="mv${isBad(k) ? ' bad' : ''}" data-ply="${k + 1}">${classIcon(review.moves[k].cls, 16)}<span>${esc(sanDe(m.san))}</span>${note}${t}</button>`;
+    const rep = S.rep && S.rep.ply === k && S.rep.type !== 'complete'
+      ? `<i class="rep-dot ${S.rep.type}" title="${S.rep.type === 'you' ? 'Hier bist du von deinem Repertoire abgewichen' : 'Hier hat dein Gegner dein Repertoire verlassen'}">R</i>` : '';
+    return `<button type="button" class="mv${isBad(k) ? ' bad' : ''}" data-ply="${k + 1}">${classIcon(review.moves[k].cls, 16)}<span>${esc(sanDe(m.san))}</span>${rep}${note}${t}</button>`;
   };
   // Gespeicherte Varianten stehen unter der Zeile mit dem Zug, den sie ersetzen
   const saved = (S.annot && S.annot.lines) || [];

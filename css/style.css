@@ -729,3 +729,19 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 .ng-state { color: var(--muted); font-size: .86rem; white-space: nowrap; }
 .ng-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .new-games .hint { margin: 4px 0 0; }
+
+/* ---- Repertoire ---------------------------------------------------------- */
+.rep-line { display: flex; align-items: center; gap: 6px; }
+.rep-show { flex: 1; min-width: 0; text-align: left; background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 7px 11px; }
+.rep-show:hover, .rep-line.on .rep-show { border-color: var(--accent); }
+.rep-show b { display: block; font-size: .93rem; }
+.rep-show small { display: block; color: var(--muted); font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rep-form { display: grid; gap: 8px; }
+.rep-form select, .rep-form input, .rep-form textarea { background: var(--bg-2); color: var(--text); border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; font: inherit; font-size: .93rem; }
+.rep-form textarea { resize: vertical; }
+.rep-form .btn { justify-self: start; }
+.rep-star { color: #f7c631; font-style: normal; }
+.rep-dot { font-style: normal; font-size: .62rem; font-weight: 800; width: 15px; height: 15px; border-radius: 4px; display: inline-grid; place-items: center; flex: none; }
+.rep-dot.you { background: #f7a531; color: #1a2029; }
+.rep-dot.opp { background: #5c8bb0; color: #fff; }
+.rep-box p { margin: 0 0 8px; }
