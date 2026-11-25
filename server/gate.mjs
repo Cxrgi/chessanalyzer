@@ -1,5 +1,5 @@
 // Zugang zur Seite: Benutzerkonten + Verwaltung. Läuft unverändert im lokalen Server (server.js)
-// und als Netlify Edge Function – beide übergeben nur zwei Schlüssel-Wert-Speicher.
+// und im Cloudflare Worker (cloudflare/worker.js) – beide übergeben nur zwei Schlüssel-Wert-Speicher.
 //
 // - Jede Person legt ein eigenes Konto an (Benutzername + Passwort) und hat ihren eigenen Stand.
 // - Die Verwaltung unter /admin ist mit dem Betreiber-Passwort geschützt (das frühere Seiten-Passwort,

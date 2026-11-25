@@ -93,7 +93,7 @@ const server = http.createServer(async (req, res) => {
     if (!(await stat(file)).isFile()) throw new Error('kein File');
     res.writeHead(200, {
       'Content-Type': MIME[extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache',
-      // wie auf Netlify: Mehrkern-Engine erlauben (siehe netlify.toml)
+      // wie auf Cloudflare: Mehrkern-Engine erlauben (siehe cloudflare/worker.js)
       'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'credentialless',
     });
     res.end(await readFile(file));

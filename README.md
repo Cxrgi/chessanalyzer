@@ -3,7 +3,7 @@
 Kostenlose Partieanalyse für chess.com-Partien – für alle, die dafür kein Abo bezahlen wollen.
 Link einfügen, und ein Coach geht die Partie Zug für Zug mit dir durch.
 
-**Live:** <https://chessanalyzer-cxrgi.netlify.app>
+**Live:** <https://chessanalyzer.cxrgi.workers.dev> (die frühere Adresse chessanalyzer-cxrgi.netlify.app leitet dorthin weiter)
 
 Nicht mit Chess.com verbunden. Die komplette Analyse läuft im Browser auf deinem Gerät (Stockfish als WebAssembly).
 
@@ -72,7 +72,7 @@ Nicht mit Chess.com verbunden. Die komplette Analyse läuft im Browser auf deine
   Konten ansehen, sperren, abmelden, löschen (samt Daten), Übergangs-Passwort vergeben, Speicherverbrauch je Konto
   (auf Knopfdruck), Daten eines Kontos als JSON exportieren, Registrierung offen / nur mit Einladungscode /
   geschlossen, Höchstzahl an Konten, Hinweistext für alle.
-- Gespeichert werden nur gesalzene Hashes, nie Passwörter – auf Netlify im Blob-Speicher (`auth` für Konten,
+- Gespeichert werden nur gesalzene Hashes, nie Passwörter – auf Cloudflare in der D1-Datenbank (Bereich `auth` für Konten,
   `sync` für die Stände), lokal im Ordner `.data/`.
 - Geschützt sind Seite, Skripte und `/api/*`. Bilder, Stylesheet, Engine und die freien Daten bleiben abrufbar.
 - Umgebungsvariable `SETUP_TOKEN`: Ist sie gesetzt, kann nur jemand mit diesem Code das erste Betreiber-Passwort festlegen.
@@ -96,33 +96,47 @@ Die Seite direkt per Doppelklick auf `index.html` zu öffnen funktioniert nicht 
 
 ## Online stellen
 
-| Hosting | Link einfügen genügt? | Hinweis |
-| --- | --- | --- |
-| **Netlify** | Ja | Repository verbinden, fertig. `netlify.toml` und die Funktion unter `netlify/functions/` sind schon dabei. |
-| **Eigener Server** | Ja | `npm start` (Port über die Umgebungsvariable `PORT`). |
-| **GitHub Pages** o. ä. (rein statisch) | Mit Benutzername | Ohne Server-Funktion wird die Partie über dein öffentliches Partie-Archiv gefunden – dafür einmal den chess.com-Namen eintragen. |
+Die Seite läuft als **Cloudflare Worker** unter `chessanalyzer.cxrgi.workers.dev` (kostenloser Tarif):
+
+```bash
+CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=… npm run deploy
+```
+
+`tools/deploy-cloudflare.mjs` lädt neue oder geänderte Browser-Dateien in den KV-Speicher „chessanalyzer-site“
+(Schlüssel = Prüfsumme des Inhalts), schreibt `cloudflare/site-manifest.json` und veröffentlicht den Worker
+(`cloudflare/worker.js`, Einstellungen in `wrangler.toml`). Mit `--maintenance` zeigt die Seite nur „zieht gerade um“.
+
+- **Speicher:** D1-Datenbank „chessanalyzer“ (Westeuropa), eine Tabelle `kv` – siehe `cloudflare/schema.sql`.
+- **Warum KV für die Dateien?** Der eingebaute Datei-Upload von Cloudflare braucht einen eigenen Schlüssel; der KV-Weg
+  funktioniert mit dem normalen API-Token. Unveränderte Dateien beantwortet der Worker mit „304 – unverändert“.
+- **Grenzen des kostenlosen Tarifs** (werden nicht berechnet, sondern blockiert): 100.000 Worker-Anfragen pro Tag für
+  das ganze Cloudflare-Konto, 10 ms Rechenzeit pro Anfrage, KV: 100.000 Lesezugriffe und 1.000 Schreibzugriffe pro Tag.
+  Der Service Worker hält die Dateien im Gerät, deshalb fallen pro Besuch nur wenige Anfragen an.
+- **Alte Adresse:** `netlify-redirect/` enthält die Netlify-Einstellungen, die alles auf die neue Adresse weiterleiten.
+- **Eigener Server:** `npm start` (Port über `PORT`) – mit Konten, Daten in `.data/`.
+- **Rein statisch** (z. B. GitHub Pages): ohne Konten und ohne Partie-Proxy; Partien werden dann über das öffentliche
+  Archiv gefunden (einmal den chess.com-Namen eintragen).
 
 Hintergrund: chess.com erlaubt Browsern anderer Webseiten nicht, eine Partie direkt über ihre ID abzurufen.
 Deshalb holt eine winzige Server-Funktion (`server/proxy.mjs`) die Partie-Daten. Die öffentliche Archiv-Schnittstelle
 (`api.chess.com/pub`) funktioniert dagegen direkt aus dem Browser und dient als Ausweichweg.
 
-### Sparsam mit dem Netlify-Kontingent
+### Sparsam mit den Kontingenten
 
-- Die Seite hat keinen Build-Schritt; es wird nur veröffentlicht, wenn du es auslöst.
 - Analyse, Aufgaben, Lektionen und alle Statistiken laufen im Browser. Der Server wird nur für die Anmeldung, die
-  Synchronisierung (wenige kleine Anfragen pro Sitzung) und das Laden einer chess.com-Partie per Link gebraucht.
+  Synchronisierung (wenige kleine Anfragen pro Sitzung), das Ausliefern der Dateien und das Laden einer chess.com-Partie
+  per Link gebraucht.
 - Der Service Worker (`sw.js`) liefert bereits geladene Dateien aus dem Gerätespeicher. **Bei jeder Veröffentlichung
   `VERSION` in `sw.js` ändern**, damit alle Geräte die neuen Dateien holen (sonst dauert es bis zu einem Tag).
 - Schutz vor Missbrauch: Höchstzahl an Konten, Bremse für Registrierungen und Fehlversuche, Größengrenzen je Konto.
   Wird es trotzdem zu viel, lässt sich die Registrierung in der Verwaltung auf Einladungscode oder „geschlossen“ stellen.
-- Bewusst nicht eingebaut, weil es laufend Kontingent kosten würde: KI-Erklärungen und Überwachung/Alarme.
 
 ### Engine-Geschwindigkeit
 
 - Die Partieanalyse rechnet mit mehreren Engines gleichzeitig: 2 auf Handys, bis zu 6 auf PCs mit 8 und mehr Kernen.
   Jede Engine rechnet zusammenhängende Abschnitte von hinten nach vorn und nutzt so ihre Hash-Tabelle weiter.
 - Die Live-Analyse (eigene Varianten, Analysebrett) nutzt auf PCs mehrere Kerne. Dafür sendet die Seite die Header
-  `Cross-Origin-Opener-Policy: same-origin` und `Cross-Origin-Embedder-Policy: credentialless` (siehe `netlify.toml`).
+  `Cross-Origin-Opener-Policy: same-origin` und `Cross-Origin-Embedder-Policy: credentialless` (siehe `cloudflare/worker.js`).
   Browser ohne Unterstützung (z. B. Safari) und Handys bekommen automatisch die Einzelkern-Engine; startet die
   Mehrkern-Engine nicht, wird ebenfalls auf die Einzelkern-Engine umgeschaltet.
 
@@ -181,7 +195,7 @@ sw.js                 Service Worker (offline, weniger Anfragen)
 manifest.webmanifest  App-Daten für „Zum Startbildschirm hinzufügen“
 tests/                Automatische Tests (node --test)
 data/puzzles/         Aufgaben nach Schwierigkeit (erzeugt mit tools/select-puzzles.py + tools/build-puzzles.mjs)
-server/gate.mjs       Anmeldung: Benutzerkonten und Verwaltung (lokaler Server und Netlify Edge Function)
+server/gate.mjs       Anmeldung: Benutzerkonten und Verwaltung (lokaler Server und Cloudflare Worker)
 server/sync.mjs       Synchronisierung je Konto
 server/login-page.mjs Anmelde- und Registrierungsseite
 server/admin-page.mjs Verwaltung (/admin)
@@ -189,7 +203,10 @@ server/legal-pages.mjs Impressum und Datenschutzerklärung
 js/sync.js            Synchronisierung im Browser, Sicherungs-Code (Zusammenführen: js/sync-merge.js)
 data/openings.json    Eröffnungsbuch (erzeugt mit tools/build-openings.mjs)
 server.js             Lokaler Server mit /api/game
-netlify/functions/    Dieselbe Funktion für Netlify
+cloudflare/           Cloudflare Worker (worker.js) und Datenbank-Schema
+wrangler.toml         Cloudflare-Einstellungen
+tools/deploy-cloudflare.mjs  Veröffentlichen auf Cloudflare
+netlify-redirect/     Weiterleitung der alten Netlify-Adresse
 vendor/               Stockfish und chess.js
 ```
 

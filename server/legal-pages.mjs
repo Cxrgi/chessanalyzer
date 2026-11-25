@@ -60,7 +60,7 @@ export function impressumPage(legal) {
 export function privacyPage(legal) {
   return shell('Datenschutz', `
   <h1>Datenschutzerklärung</h1>
-  <p class="muted">Stand: November 2026</p>
+  <p class="muted">Stand: November 2026 (Umzug zu Cloudflare)</p>
 
   <h2>1. Wer ist verantwortlich?</h2>
   ${operator(legal)}
@@ -78,7 +78,8 @@ export function privacyPage(legal) {
   <p><b>Zweck und Rechtsgrundlage:</b> Bereitstellung der Seite und deines Kontos (Art. 6 Abs. 1 lit. b DSGVO).</p>
 
   <h2>4. Hosting</h2>
-  <p>Die Seite läuft bei Netlify, Inc. (USA). Beim Aufruf verarbeitet Netlify technisch notwendige Daten wie deine IP-Adresse, den Zeitpunkt und die aufgerufene Adresse, um die Seite auszuliefern und vor Missbrauch zu schützen (Art. 6 Abs. 1 lit. f DSGVO). Konto und Stand werden auf Servern von Netlify gespeichert; dabei können Daten in die USA übertragen werden. Näheres steht in der <a href="https://www.netlify.com/privacy/" rel="noopener">Datenschutzerklärung von Netlify</a>.</p>
+  <p>Die Seite läuft bei Cloudflare, Inc. (USA) als „Cloudflare Worker“. Beim Aufruf verarbeitet Cloudflare technisch notwendige Daten wie deine IP-Adresse, den Zeitpunkt und die aufgerufene Adresse, um die Seite auszuliefern und vor Missbrauch zu schützen (Art. 6 Abs. 1 lit. f DSGVO). Konto und Stand werden in einer Datenbank von Cloudflare gespeichert, die in Westeuropa liegt; dabei können Daten auch in die USA übertragen werden. Näheres steht in der <a href="https://www.cloudflare.com/privacypolicy/" rel="noopener">Datenschutzerklärung von Cloudflare</a>.</p>
+  <p>Bis November 2026 lief die Seite bei Netlify, Inc. (USA). Die alte Adresse leitet seitdem nur noch hierher weiter.</p>
 
   <h2>5. Cookies und Speicher im Browser</h2>
   <ul>
