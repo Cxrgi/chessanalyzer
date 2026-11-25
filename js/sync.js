@@ -6,7 +6,7 @@ import { mergeStates, sameState, emptyState } from './sync-merge.js';
 import { buildPgn, packPgn, unpackPgn } from './pgn.js';
 
 /** Was aus dem Browser-Speicher mitgenommen wird (gerätebezogene Kleinigkeiten wie das Analysebrett bleiben lokal). */
-export const SYNC_KEYS = ['settings', 'username', 'site', 'puzzles', 'lessons', 'activity', 'play', 'endgames', 'wins', 'ratings', 'trainers'];
+export const SYNC_KEYS = ['settings', 'username', 'site', 'puzzles', 'lessons', 'activity', 'play', 'endgames', 'wins', 'ratings', 'trainers', 'newseen', 'repertoire'];
 const BOOK = 'ca.sync'; // Buchführung dieses Geräts (wird nicht synchronisiert)
 const PUSH_DELAY = 30000;
 const PUSH_GAP = 120000;

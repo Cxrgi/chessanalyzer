@@ -41,6 +41,7 @@ const COMBINE = {
   lessons: (a, b) => ({ ...a, ...b }),
   endgames: (a, b) => ({ ...a, ...b }),
   wins: (a, b) => Math.max(Number(a) || 0, Number(b) || 0),
+  newseen: (a, b) => Math.max(Number(a) || 0, Number(b) || 0),
   ratings: (a, b, newer) => ({ ...(newer === 'a' ? b : a), ...(newer === 'a' ? a : b) }),
   trainers: (a, b) => {
     const openings = { ...((a || {}).openings || {}) };
@@ -55,7 +56,7 @@ function mergeKey(name, a, b) {
   if (!b) return a;
   const at = Math.max(a.at || 0, b.at || 0);
   const combine = COMBINE[name];
-  if (combine && (name === 'wins' || (isObj(a.v) && isObj(b.v)))) return { v: combine(a.v, b.v, (a.at || 0) >= (b.at || 0) ? 'a' : 'b'), at };
+  if (combine && (name === 'wins' || name === 'newseen' || (isObj(a.v) && isObj(b.v)))) return { v: combine(a.v, b.v, (a.at || 0) >= (b.at || 0) ? 'a' : 'b'), at };
   // Sonst gewinnt die neuere Änderung. Ist ein Wert noch nie abgeglichen worden (at ≤ 1), gewinnt bei
   // Fortschrittsdaten der umfangreichere Stand – so geht beim ersten Abgleich nichts Wertvolles verloren.
   const fresh = (x) => (x.at || 0) <= 1;

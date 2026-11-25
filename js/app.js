@@ -376,6 +376,29 @@ function bindEvents() {
     }
   });
   $('lessons-search').addEventListener('input', (e) => renderLessonList(e.target.value));
+  $('new-games').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.ngAll) enqueueNewGames();
+    else if (b.dataset.ngOpen) location.hash = '#' + b.dataset.ngOpen;
+    else if (b.dataset.ngHide) {
+      // Merker: alles bis zur neuesten dieser Partien gilt als gesehen (auch auf anderen Geräten)
+      const newest = Math.max(...NG.list.map((x) => x.at));
+      store.set('newseen', Math.max(Number(store.get('newseen', 0)) || 0, newest));
+      NG.list = [];
+      NG.queue = [];
+      renderNewGames();
+    } else if (b.dataset.ngNow) {
+      const entry = NG.list.find((x) => x.id === b.dataset.ngNow);
+      try {
+        if (entry) startGame(entry.load());
+      } catch (err) {
+        console.error(err);
+        NG.failed.add(entry.id);
+        renderNewGames();
+      }
+    }
+  });
   $('hub-continue').onclick = () => {
     const { next } = lessonProgress();
     if (next) location.hash = '#lektion/' + next.id;
@@ -926,6 +949,7 @@ function leaveModes() {
 /** Startseite mit allen Bereichen. */
 function goHome(fromHash) {
   leaveModes();
+  resumeNewQueue();
   S.view = 'hub';
   showMain('hub');
   setStatus('');
@@ -951,6 +975,8 @@ function renderHub() {
   $('tile-profile').innerHTML = `<span>${streak === 1 ? '1 Tag' : streak + ' Tage'} in Folge · heute ${today.puzzles || 0} Aufgaben</span>`;
   const tn = trainerSummary();
   $('tile-trainer').innerHTML = `<span>${tn.learned} von ${tn.total} Eröffnungen${tn.coords ? ` · Rekord ${tn.coords} Felder` : ''}</span>`;
+  renderNewGames();
+  checkNewGames();
   const cont = $('hub-continue');
   cont.hidden = !next || done === 0;
   if (next) cont.innerHTML = `<div><span>Weiter lernen</span><b>${esc(next.title)}</b></div>${uiIcon('arrow', 22)}`;
@@ -1149,6 +1175,7 @@ async function initAccount() {
   }
   startSync();
   bindAccount();
+  if (S.view === 'hub') checkNewGames();
 }
 
 function bindAccount() {
@@ -1252,6 +1279,173 @@ async function runEngine(game, book, depth, pool, onProgress, onKnown) {
   return positions;
 }
 
+// ---------------------------------------------------------------------------
+// Neue Partien: beim Öffnen der Startseite die eigenen letzten Partien prüfen und auf Wunsch
+// nacheinander im Hintergrund analysieren (immer nur eine zur Zeit – so bleibt das Gerät bedienbar).
+// ---------------------------------------------------------------------------
+
+const NEW_CHECK_GAP = 10 * 60000;
+const NEW_WINDOW = 3 * 86400000; // ohne Merker: Partien der letzten drei Tage
+const NG = { key: '', checked: 0, checking: false, list: [], queue: [], done: new Set(), failed: new Set(), current: null, pool: null, busy: false, paused: false, error: '' };
+
+const youOf = (game) => {
+  const me = S.username.toLowerCase();
+  return game.white.name.toLowerCase() === me ? 'w' : game.black.name.toLowerCase() === me ? 'b' : null;
+};
+
+async function checkNewGames(force = false) {
+  if (!S.username || NG.checking) return;
+  const key = `${S.site}:${S.username.toLowerCase()}`;
+  if (!force && NG.key === key && Date.now() - NG.checked < NEW_CHECK_GAP) return;
+  NG.checking = true;
+  try {
+    const entries = S.site === 'lichess' ? await fetchLichessGames(S.username, 15) : await fetchRecentGames(S.username, { months: 2, limit: 30 });
+    const since = Math.max(Number(store.get('newseen', 0)) || 0, Date.now() - NEW_WINDOW);
+    const fresh = [];
+    for (const e of entries) {
+      if (e.at <= since || fresh.length >= 10) continue;
+      if (await db.get('meta', e.id).catch(() => null)) continue;
+      fresh.push(e);
+    }
+    if (NG.key !== key) {
+      NG.queue = [];
+      NG.done = new Set();
+      NG.failed = new Set();
+    }
+    NG.key = key;
+    NG.checked = Date.now();
+    NG.error = '';
+    // Bereits im Hintergrund fertig gewordene Partien bleiben in der Liste (mit „Öffnen“)
+    const keep = NG.list.filter((e) => NG.done.has(e.id) && !fresh.some((f) => f.id === e.id));
+    NG.list = [...fresh, ...keep].sort((a, b) => b.at - a.at);
+  } catch (e) {
+    NG.error = 'failed'; // still: Die Startseite funktioniert auch ohne diese Liste
+  } finally {
+    NG.checking = false;
+  }
+  renderNewGames();
+}
+
+function renderNewGames() {
+  const box = $('new-games');
+  if (!box) return;
+  const list = NG.list;
+  if (!list.length || S.view !== 'hub') {
+    box.hidden = true;
+    return;
+  }
+  const site = S.site === 'lichess' ? 'Lichess' : 'chess.com';
+  const open = list.filter((e) => !NG.done.has(e.id) && !NG.failed.has(e.id));
+  const running = NG.busy && NG.current;
+  const rows = list.map((e) => {
+    const you = e.white.name.toLowerCase() === S.username.toLowerCase() ? 'w' : e.black.name.toLowerCase() === S.username.toLowerCase() ? 'b' : null;
+    const opp = you === 'w' ? e.black : you === 'b' ? e.white : null;
+    const res = !you || e.result === '1/2-1/2' ? 'draw' : (e.result === '1-0') === (you === 'w') ? 'win' : 'loss';
+    const letter = { win: 'S', loss: 'N', draw: 'R' }[res];
+    const who = opp ? `gegen ${esc(opp.name)}${opp.rating ? ` (${opp.rating})` : ''}` : `${esc(e.white.name)} – ${esc(e.black.name)}`;
+    const when = new Date(e.at).toLocaleString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    let status;
+    if (NG.done.has(e.id)) status = `<button type="button" class="btn soft small" data-ng-open="${esc(e.id)}">✓ Öffnen</button>`;
+    else if (NG.failed.has(e.id)) status = '<span class="ng-state" title="Diese Partie ließ sich nicht lesen (z. B. eine Schachvariante)">nicht lesbar</span>';
+    else if (running && NG.current.id === e.id) status = `<span class="ng-state">${Math.round((NG.current.done / Math.max(1, NG.current.total)) * 100)} %</span>`;
+    else if (NG.queue.some((q) => q.id === e.id)) status = '<span class="ng-state">wartet</span>';
+    else status = `<button type="button" class="btn soft small" data-ng-now="${esc(e.id)}">Jetzt ansehen</button>`;
+    return `<li><span class="game-res ${res}">${letter}</span><span class="ng-who">${who}<small>${esc(timeClassName(e.timeClass))} · ${esc(when)}</small></span>${status}</li>`;
+  }).join('');
+  const head = open.length
+    ? `${open.length === 1 ? 'Eine neue Partie' : `${open.length} neue Partien`} auf ${site}`
+    : NG.done.size ? 'Alle neuen Partien sind analysiert' : `Neue Partien auf ${site}`;
+  let foot;
+  if (running) {
+    const pos = list.filter((e) => NG.done.has(e.id)).length + 1;
+    foot = `<p class="hint">Analysiere im Hintergrund (${pos} von ${pos + NG.queue.length - 1}) – du kannst die Seite währenddessen ganz normal benutzen.</p>`;
+  } else if (NG.queue.length && NG.paused) {
+    foot = '<p class="hint">Pausiert, solange du eine andere Partie analysierst. Geht auf der Startseite automatisch weiter.</p>';
+  } else foot = '';
+  const actions = [];
+  if (open.length > 1 && !NG.busy && !NG.queue.length) actions.push(`<button type="button" class="btn primary small" data-ng-all="1">Alle ${open.length} im Hintergrund analysieren</button>`);
+  if (open.length === 1 && !NG.busy && !NG.queue.length) actions.push('<button type="button" class="btn primary small" data-ng-all="1">Im Hintergrund analysieren</button>');
+  if (!NG.busy) actions.push(`<button type="button" class="btn ghost small" data-ng-hide="1">${open.length ? 'Ausblenden' : 'Fertig'}</button>`);
+  box.hidden = false;
+  box.innerHTML = `<header><b>${head}</b>${uiIcon('play', 18)}</header><ul class="ng-list">${rows}</ul>${foot}<div class="ng-actions">${actions.join('')}</div>`;
+}
+
+function enqueueNewGames() {
+  for (const e of NG.list) if (!NG.done.has(e.id) && !NG.failed.has(e.id) && !NG.queue.some((q) => q.id === e.id)) NG.queue.push(e);
+  NG.paused = false;
+  runNewQueue();
+}
+
+function pauseNewQueue() {
+  if (!NG.busy) return;
+  NG.paused = true;
+  if (NG.pool) NG.pool.cancel();
+}
+
+function resumeNewQueue() {
+  if (!NG.paused) return;
+  NG.paused = false;
+  if (NG.queue.length) setTimeout(runNewQueue, 300);
+}
+
+async function runNewQueue() {
+  if (NG.busy || NG.paused) return;
+  NG.busy = true;
+  renderNewGames();
+  const wake = keepAwake();
+  try {
+    const book = await loadBook();
+    while (NG.queue.length && !NG.paused) {
+      const entry = NG.queue[0];
+      if (await db.get('meta', entry.id).catch(() => null)) {
+        NG.queue.shift();
+        NG.done.add(entry.id);
+        continue;
+      }
+      let game;
+      try {
+        game = entry.load();
+      } catch (e) {
+        NG.queue.shift();
+        NG.failed.add(entry.id);
+        continue;
+      }
+      const pool = new AnalysisPool();
+      NG.pool = pool;
+      NG.current = { id: entry.id, done: 0, total: 1 };
+      renderNewGames();
+      try {
+        const depth = S.settings.depth;
+        const positions = await runEngine(game, book, depth, pool, (done, total) => {
+          if (!NG.current || NG.current.id !== entry.id) return;
+          NG.current.done = done;
+          NG.current.total = total;
+          renderNewGames();
+        });
+        if (game.drawn) positions[positions.length - 1] = { lines: [], eval: { type: 'cp', value: 0 }, terminal: 'draw' };
+        const review = reviewGame(game, positions, book, scale());
+        await saveGame({ game, positions: review.positions, review, you: youOf(game) }, positions, depth);
+        bump('games');
+        NG.queue.shift();
+        NG.done.add(entry.id);
+        if (S.view === 'hub') renderHistory();
+      } catch (e) {
+        if (pool.cancelled) break; // pausiert – die Partie bleibt vorn in der Warteschlange
+        NG.queue.shift();
+        NG.failed.add(entry.id);
+      } finally {
+        NG.pool = null;
+        NG.current = null;
+      }
+    }
+  } finally {
+    wake.release();
+    NG.busy = false;
+  }
+  if (!NG.queue.length && document.hidden) playSound('end');
+  renderNewGames();
+}
+
 /** Analysiert die letzten Partien des Nutzers nacheinander im Hintergrund (für das Schwächenprofil). */
 async function batchAnalyze(n, report) {
   const entries = S.site === 'lichess' ? await fetchLichessGames(S.username, n * 3) : await fetchRecentGames(S.username, { months: 4, limit: 200 });
@@ -1296,6 +1490,7 @@ async function loadBook() {
 }
 
 async function startGame(game, cached) {
+  pauseNewQueue(); // die eigene Analyse hat Vorrang vor der Hintergrund-Analyse neuer Partien
   if (S.pool) S.pool.cancel();
   live.stop();
   leaveModes();
@@ -1397,6 +1592,7 @@ async function startGame(game, cached) {
   buildMoveList();
   showOverview();
   saveGame(ctx(), positions, (cached && cached.depth) || S.settings.depth).catch((e) => console.error(e));
+  if (NG.list.some((e) => e.id === game.id)) NG.done.add(game.id);
 }
 
 async function loadAvatars(game) {
