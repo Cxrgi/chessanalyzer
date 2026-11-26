@@ -3,14 +3,20 @@
 Kostenlose Partieanalyse für chess.com-Partien – für alle, die dafür kein Abo bezahlen wollen.
 Link einfügen, und ein Coach geht die Partie Zug für Zug mit dir durch.
 
-**Live:** <https://chessanalyzer-cxrgi.netlify.app>
+**Live:** <https://chessanalyzer.cxrgi.workers.dev> (die frühere Adresse chessanalyzer-cxrgi.netlify.app leitet dorthin weiter)
 
 Nicht mit Chess.com verbunden. Die komplette Analyse läuft im Browser auf deinem Gerät (Stockfish als WebAssembly).
 
 ## Was die Seite kann
 
-- **Passwortschutz**: Beim ersten Besuch legst du ein Passwort fest; danach kommt niemand ohne Anmeldung auf die Seite
-- **Startseite** mit allen Bereichen auf einen Blick
+- **Benutzerkonten** mit eigenem Stand je Person, **Synchronisierung** zwischen allen Geräten und eine
+  **Verwaltung** für den Betreiber
+- **Aufgeräumte Oberfläche**: Navigation links (am Handy unten) mit fünf Bereichen – *Heute* (Startseite mit
+  Tagesaufgabe, fälligem Fehler-Training, nächster Lektion, zuletzt analysierten Partien und Wochenbilanz),
+  *Analysieren*, *Trainieren* (alle Übungsarten plus Schwächen aus den eigenen Partien), *Lernen* und *Spielen*
+- **Analyse-Ansicht** mit Steuerleiste und Werkzeugen (Schlüsselmoment, Drehen, Drohung, Tiefer, Notiz) direkt unter
+  dem Brett und den Reitern *Coach*, *Züge* und *Überblick*; am Handy bleibt die Steuerleiste immer unten erreichbar
+- **Einstellungen nach Themen** (Darstellung, Brett & Figuren, Analyse & Coach, Ton, Konto, Hilfe) mit Suche
 - **Taktikaufgaben**: rund 13 500 Aufgaben von leicht bis schwer, automatisch passend zur eigenen Wertung –
   mit Wertungszahl, Serie, Statistik, Tipp, vorgespielter Lösung und Themen-Training (Gabel, Fesselung, Matt in 2 …)
 - **Lektionen**: 53 kurze, interaktive Lektionen in neun Kursen – Grundlagen, Taktik, Mattbilder, Eröffnung, Endspiel,
@@ -19,18 +25,30 @@ Nicht mit Chess.com verbunden. Die komplette Analyse läuft im Browser auf deine
 - **Partie laden** über einen chess.com- oder Lichess-Link, über deinen Benutzernamen (Liste der letzten Partien
   mit Filtern), per PGN-Text oder PGN-Datei (auch per Drag & Drop, auch mit mehreren Partien)
 - **Gegen den Computer spielen** in acht Stärkestufen (Zug zurück, Tipp, danach direkt analysieren) und
-  **Endspiel-Trainer** mit den wichtigsten Mattführungen und Turmendspielen
+  **Endspiel-Trainer** mit Mattführungen, Turmendspielen und Bauernendspielen (Opposition, Quadratregel, Durchbruch,
+  Dame gegen Bauer) – alle Stellungen mit Stockfish geprüft
 - **Fehler-Training**: Fehler aus den eigenen Partien kommen als Aufgaben in wachsenden Abständen wieder, bis sie sitzen
 - **Trainer**: Eröffnungstrainer mit 36 Hauptvarianten und Koordinaten-Trainer
 - **Mein Profil**: Genauigkeit im Verlauf, häufigste Fehlerarten mit passender Lektion und Aufgaben, Zeitmanagement,
-  Serien, Abzeichen, mehrere Partien am Stück analysieren, Sicherung als Datei (Export/Import)
+  Serien, Abzeichen, mehrere Partien am Stück analysieren, Sicherungs-Code zum Kopieren und Einfügen
 - **Taktik-Extras**: Tagesaufgabe, „Sturm“ auf Zeit, Tipp in zwei Stufen, falsch gelöste Aufgaben kommen wieder,
   Statistik je Thema
-- **Exportieren und teilen**: kommentierte PGN (mit Bewertungen), Teilen-Link, Brett als Bild, Fazit als Text
+- **Exportieren und teilen**: kommentierte PGN (mit Bewertungen), Teilen-Link mit fertiger Analyse (der Empfänger muss
+  nichts neu rechnen), Brett als Bild, Fazit als Text
 - **Werkzeuge in der Analyse**: „Nur Fehler“, „Drohung zeigen“, „Tiefer rechnen“, eigene Pfeile und Markierungen per
   Rechtsklick, Mausrad zum Blättern, Tastenkürzel-Übersicht mit `?`
-- **Einstellungen**: helles oder dunkles Design, Brettgröße, Notation (deutsch, englisch, Figuren), Strenge der
-  Bewertung, Zahl der Engine-Linien, Farben für Farbenblinde, Lautstärke, Animationen
+- **Live-Vorschau**: Während die Engine rechnet, füllen sich Bewertungsverlauf und vorläufige Genauigkeit
+- **„Zeig mir warum“**: Bei Fehlern spielt der Coach die Bestrafung vor, bei verpassten Chancen den besseren Weg und bei
+  brillanten oder großartigen Zügen, warum sie funktionieren – mit Fazit zu Material und Bewertung
+- **Eigene Varianten und Notizen** zu jeder Partie: bleiben gespeichert, werden mit dem Konto abgeglichen und stehen in
+  der PGN-Datei als Nebenvarianten und Kommentare
+- **Neue Partien**: Die Startseite erkennt neue Partien deines chess.com- oder Lichess-Kontos und analysiert sie auf Wunsch
+  nacheinander im Hintergrund (eine eigene Analyse hat immer Vorrang)
+- **Eröffnungs-Repertoire**: Eröffnungen mit Weiß und Schwarz festlegen (aus dem Trainer, als eigene Linie oder vom
+  Analysebrett); die Analyse zeigt, wo du oder dein Gegner davon abgewichen seid
+- **Einstellungen**: helles, dunkles Design oder System-Standard, 11 Brettfarben, 9 Figurensätze,
+  Brettgröße, Notation (deutsch, englisch, Figuren), Strenge der Bewertung, Zahl der Engine-Linien, Farben für
+  Farbenblinde, Lautstärke, Animationen
 - **Offline nutzbar** und als App installierbar (Service Worker); einmal geladene Dateien kommen aus dem Gerätespeicher
 - **Jeder Zug bewertet**: Brillant, Großartig, Bester Zug, Ausgezeichnet, Gut, Buchzug, Ungenauigkeit, Fehler, Verpasste Chance, Patzer
 - **Bewertungsleiste**, Genauigkeit für beide Seiten, Bewertungsdiagramm, Eröffnungsname
@@ -47,20 +65,27 @@ Nicht mit Chess.com verbunden. Die komplette Analyse läuft im Browser auf deine
 - Uhren, geschlagene Figuren, Brett drehen, Tastatursteuerung (← → Pos1 Ende, F = drehen, N = nächster Schlüsselmoment), Töne
 - Brettfarben und Figurensets wählbar, bereits analysierte Partien werden im Browser gespeichert
 
-## Passwort
+## Konten und Verwaltung
 
-- Beim allerersten Aufruf fragt die Seite nach einem neuen Passwort und zeigt einmalig einen **Notfall-Code**.
-  Mit ihm lässt sich der Schutz zurücksetzen, falls das Passwort vergessen wurde („Passwort vergessen?“ auf der Anmeldeseite).
-- Ändern lässt sich das Passwort in den Einstellungen (Zahnrad), abmelden über das Symbol daneben.
-- Gespeichert wird nur ein gesalzener Hash – auf Netlify im Blob-Speicher `auth`, lokal in `.data/auth.json`.
-  Wer beides verloren hat (Passwort und Notfall-Code), löscht diesen Eintrag und richtet die Seite neu ein.
-- Geschützt sind Seite, Skripte, Daten und `/api/*`. Bilder, Stylesheet und die Engine-Dateien bleiben abrufbar.
-- Auf rein statischem Hosting (z. B. GitHub Pages) gibt es keinen Passwortschutz, weil dort kein Server-Code läuft.
-- Lokal ohne Passwort starten: `NO_PASSWORD=1 npm start`
-- Passwort ändern meldet alle anderen Geräte ab; in den Einstellungen gibt es außerdem „Auf allen anderen Geräten abmelden“.
-- Umgebungsvariable `SETUP_TOKEN`: Ist sie gesetzt, kann nur jemand mit diesem Code das erste Passwort festlegen.
-- Umgebungsvariable `REQUIRE_LOGIN=false` schaltet den Schutz ab (öffentliche Seite).
-- Beim Abmelden werden die offline gespeicherten Dateien vom Gerät gelöscht.
+- **Benutzerkonten:** Jede Person legt ein eigenes Konto an (Benutzername, Passwort, wo sie spielt und unter welchem
+  Namen). Partien, Fortschritt, Trainingskarten und Einstellungen gehören zum Konto und sind auf jedem Gerät gleich.
+- **Synchronisierung:** ein Abruf beim Öffnen, danach wird nur hochgeladen, wenn sich etwas geändert hat (gebündelt,
+  höchstens alle zwei Minuten). Analysierte Partien werden einmal hochgeladen und auf anderen Geräten bei Bedarf geholt.
+- **Sicherungs-Code** (im Profil): der komplette Stand als Text zum Kopieren und Einfügen – auch ohne Konto nutzbar.
+- **Abmelden** lädt erst alles hoch und entfernt dann den Stand von diesem Gerät, damit sich Konten nicht vermischen.
+- **Verwaltung** unter `/admin`, geschützt durch das Betreiber-Passwort (mit Notfall-Code zum Zurücksetzen):
+  Konten ansehen, sperren, abmelden, löschen (samt Daten), Übergangs-Passwort vergeben, Speicherverbrauch je Konto
+  (auf Knopfdruck), Daten eines Kontos als JSON exportieren, Registrierung offen / nur mit Einladungscode /
+  geschlossen, Höchstzahl an Konten, Hinweistext für alle.
+- Gespeichert werden nur gesalzene Hashes, nie Passwörter – auf Cloudflare in der D1-Datenbank (Bereich `auth` für Konten,
+  `sync` für die Stände), lokal im Ordner `.data/`.
+- Geschützt sind Seite, Skripte und `/api/*`. Bilder, Stylesheet, Engine und die freien Daten bleiben abrufbar.
+- Umgebungsvariable `SETUP_TOKEN`: Ist sie gesetzt, kann nur jemand mit diesem Code das erste Betreiber-Passwort festlegen.
+- `REQUIRE_LOGIN=false` (oder lokal `NO_PASSWORD=1 npm start`) schaltet Anmeldung, Konten und Synchronisierung ab;
+  dann liegt alles nur im jeweiligen Browser. Dasselbe gilt für rein statisches Hosting (z. B. GitHub Pages).
+- **Impressum und Datenschutzerklärung** stehen unter `/impressum` und `/datenschutz` (ohne Anmeldung lesbar, verlinkt
+  auf der Anmeldeseite und in der App). Name, Anschrift und E-Mail des Betreibers werden in der Verwaltung eingetragen –
+  sie stehen also nicht im Code. Die Texte beschreiben, was die Seite technisch tut; sie ersetzen keine Rechtsberatung.
 
 ## Starten
 
@@ -76,25 +101,49 @@ Die Seite direkt per Doppelklick auf `index.html` zu öffnen funktioniert nicht 
 
 ## Online stellen
 
-| Hosting | Link einfügen genügt? | Hinweis |
-| --- | --- | --- |
-| **Netlify** | Ja | Repository verbinden, fertig. `netlify.toml` und die Funktion unter `netlify/functions/` sind schon dabei. |
-| **Eigener Server** | Ja | `npm start` (Port über die Umgebungsvariable `PORT`). |
-| **GitHub Pages** o. ä. (rein statisch) | Mit Benutzername | Ohne Server-Funktion wird die Partie über dein öffentliches Partie-Archiv gefunden – dafür einmal den chess.com-Namen eintragen. |
+Die Seite läuft als **Cloudflare Worker** unter `chessanalyzer.cxrgi.workers.dev` (kostenloser Tarif):
+
+```bash
+CLOUDFLARE_API_TOKEN=… CLOUDFLARE_ACCOUNT_ID=… npm run deploy
+```
+
+`tools/deploy-cloudflare.mjs` lädt neue oder geänderte Browser-Dateien in den KV-Speicher „chessanalyzer-site“
+(Schlüssel = Prüfsumme des Inhalts), schreibt `cloudflare/site-manifest.json` und veröffentlicht den Worker
+(`cloudflare/worker.js`, Einstellungen in `wrangler.toml`). Mit `--maintenance` zeigt die Seite nur „zieht gerade um“.
+
+- **Speicher:** D1-Datenbank „chessanalyzer“ (Westeuropa), eine Tabelle `kv` – siehe `cloudflare/schema.sql`.
+- **Warum KV für die Dateien?** Der eingebaute Datei-Upload von Cloudflare braucht einen eigenen Schlüssel; der KV-Weg
+  funktioniert mit dem normalen API-Token. Unveränderte Dateien beantwortet der Worker mit „304 – unverändert“.
+- **Grenzen des kostenlosen Tarifs** (werden nicht berechnet, sondern blockiert): 100.000 Worker-Anfragen pro Tag für
+  das ganze Cloudflare-Konto, 10 ms Rechenzeit pro Anfrage, KV: 100.000 Lesezugriffe und 1.000 Schreibzugriffe pro Tag.
+  Der Service Worker hält die Dateien im Gerät, deshalb fallen pro Besuch nur wenige Anfragen an.
+- **Alte Adresse:** `netlify-redirect/` enthält die Netlify-Einstellungen, die alles auf die neue Adresse weiterleiten.
+- **Eigener Server:** `npm start` (Port über `PORT`) – mit Konten, Daten in `.data/`.
+- **Rein statisch** (z. B. GitHub Pages): ohne Konten und ohne Partie-Proxy; Partien werden dann über das öffentliche
+  Archiv gefunden (einmal den chess.com-Namen eintragen).
 
 Hintergrund: chess.com erlaubt Browsern anderer Webseiten nicht, eine Partie direkt über ihre ID abzurufen.
 Deshalb holt eine winzige Server-Funktion (`server/proxy.mjs`) die Partie-Daten. Die öffentliche Archiv-Schnittstelle
 (`api.chess.com/pub`) funktioniert dagegen direkt aus dem Browser und dient als Ausweichweg.
 
-### Sparsam mit dem Netlify-Kontingent
+### Sparsam mit den Kontingenten
 
-- Die Seite hat keinen Build-Schritt; es wird nur veröffentlicht, wenn du es auslöst.
-- Analyse, Aufgaben, Lektionen und alle Statistiken laufen im Browser. Der Server wird nur für die Anmeldung und für das
-  Laden einer chess.com-Partie per Link gebraucht.
+- Analyse, Aufgaben, Lektionen und alle Statistiken laufen im Browser. Der Server wird nur für die Anmeldung, die
+  Synchronisierung (wenige kleine Anfragen pro Sitzung), das Ausliefern der Dateien und das Laden einer chess.com-Partie
+  per Link gebraucht.
 - Der Service Worker (`sw.js`) liefert bereits geladene Dateien aus dem Gerätespeicher. **Bei jeder Veröffentlichung
   `VERSION` in `sw.js` ändern**, damit alle Geräte die neuen Dateien holen (sonst dauert es bis zu einem Tag).
-- Bewusst nicht eingebaut, weil es laufend Kontingent kosten würde: Cloud-Synchronisierung, KI-Erklärungen,
-  Überwachung/Alarme und Zähler im Blob-Speicher.
+- Schutz vor Missbrauch: Höchstzahl an Konten, Bremse für Registrierungen und Fehlversuche, Größengrenzen je Konto.
+  Wird es trotzdem zu viel, lässt sich die Registrierung in der Verwaltung auf Einladungscode oder „geschlossen“ stellen.
+
+### Engine-Geschwindigkeit
+
+- Die Partieanalyse rechnet mit mehreren Engines gleichzeitig: 2 auf Handys, bis zu 6 auf PCs mit 8 und mehr Kernen.
+  Jede Engine rechnet zusammenhängende Abschnitte von hinten nach vorn und nutzt so ihre Hash-Tabelle weiter.
+- Die Live-Analyse (eigene Varianten, Analysebrett) nutzt auf PCs mehrere Kerne. Dafür sendet die Seite die Header
+  `Cross-Origin-Opener-Policy: same-origin` und `Cross-Origin-Embedder-Policy: credentialless` (siehe `cloudflare/worker.js`).
+  Browser ohne Unterstützung (z. B. Safari) und Handys bekommen automatisch die Einzelkern-Engine; startet die
+  Mehrkern-Engine nicht, wird ebenfalls auf die Einzelkern-Engine umgeschaltet.
 
 ## Tests
 
@@ -103,14 +152,16 @@ npm test
 ```
 
 Prüft alle Lektionen (jede Lösung muss ein legaler Zug sein) und die Kernfunktionen: Links erkennen, Züge dekodieren,
-PGN lesen und schreiben, Zugbewertung, Eröffnungslinien und den Passwortschutz. Dieselben Tests laufen bei jedem Push
+PGN lesen und schreiben, Zugbewertung, Eröffnungslinien, Konten, Verwaltung, Synchronisierung, Repertoire,
+Teilen-Links mit Analyse, Notizen und Varianten im PGN. Dieselben Tests laufen bei jedem Push
 über GitHub Actions (`.github/workflows/ci.yml`).
 
 ## Grenzen
 
 - Nur normales Schach (kein Chess960 und keine anderen Varianten).
-- Alle Daten (Partien, Fortschritt, Einstellungen) liegen nur im Browser des jeweiligen Geräts. Zum Umziehen auf ein
-  anderes Gerät gibt es im Profil die Sicherung als Datei.
+- Ohne Konto (lokal ohne Anmeldung oder auf statischem Hosting) liegen alle Daten nur im Browser des jeweiligen Geräts.
+  Zum Umziehen gibt es im Profil den Sicherungs-Code.
+- Passwort vergessen: Es gibt keine E-Mail-Adresse im Konto – der Betreiber vergibt in der Verwaltung ein Übergangs-Passwort.
 - Die Lektionen sind eigene Inhalte zu den üblichen Themen eines Schachkurses – nicht die Lektionen von chess.com,
   denn deren Texte, Videos und Aufgaben sind urheberrechtlich geschützt.
 - Das Brett-Design, das du auf chess.com eingestellt hast, wird von chess.com nicht mitgeliefert – deshalb startet die Seite
@@ -138,7 +189,8 @@ js/lessons-more.js    Weiterführende Lektionen
 js/puzzles.js         Taktikaufgaben (Auswahl nach Wertung, Wertungsberechnung, Themenfilter, Sturm, Tagesaufgabe)
 js/play.js            Gegen den Computer spielen, Endspiel-Trainer
 js/training.js        Fehler-Training (Karteikasten-Prinzip)
-js/trainers.js        Koordinaten- und Eröffnungstrainer (Linien in js/openings-data.js)
+js/trainers.js        Koordinaten- und Eröffnungstrainer, Repertoire-Verwaltung (Linien in js/openings-data.js)
+js/repertoire.js      Repertoire speichern und mit einer Partie vergleichen
 js/profile.js         Profil, Schwächenanalyse, Stapelanalyse, Sicherung
 js/insights.js        Zeitmanagement, Fehlerarten, Kurzfassung einer Partie
 js/pgn.js             PGN schreiben, Mehrfach-PGN, Teilen-Link
@@ -148,18 +200,28 @@ sw.js                 Service Worker (offline, weniger Anfragen)
 manifest.webmanifest  App-Daten für „Zum Startbildschirm hinzufügen“
 tests/                Automatische Tests (node --test)
 data/puzzles/         Aufgaben nach Schwierigkeit (erzeugt mit tools/select-puzzles.py + tools/build-puzzles.mjs)
-server/gate.mjs       Passwortschutz (lokaler Server und Netlify Edge Function)
+server/gate.mjs       Anmeldung: Benutzerkonten und Verwaltung (lokaler Server und Cloudflare Worker)
+server/sync.mjs       Synchronisierung je Konto
+server/login-page.mjs Anmelde- und Registrierungsseite
+server/admin-page.mjs Verwaltung (/admin)
+server/legal-pages.mjs Impressum und Datenschutzerklärung
+js/sync.js            Synchronisierung im Browser, Sicherungs-Code (Zusammenführen: js/sync-merge.js)
 data/openings.json    Eröffnungsbuch (erzeugt mit tools/build-openings.mjs)
 server.js             Lokaler Server mit /api/game
-netlify/functions/    Dieselbe Funktion für Netlify
+cloudflare/           Cloudflare Worker (worker.js) und Datenbank-Schema
+wrangler.toml         Cloudflare-Einstellungen
+tools/deploy-cloudflare.mjs  Veröffentlichen auf Cloudflare
+netlify-redirect/     Weiterleitung der alten Netlify-Adresse
 vendor/               Stockfish und chess.js
 ```
 
 ## Fremde Bestandteile und Lizenzen
 
-- [Stockfish.js](https://github.com/nmrugg/stockfish.js) 19 (Lite, single-threaded) – GPLv3, siehe `vendor/stockfish/COPYING.txt`
+- [Stockfish.js](https://github.com/nmrugg/stockfish.js) 19 (Lite, ein- und mehrkernig) – GPLv3, siehe `vendor/stockfish/COPYING.txt`
 - [chess.js](https://github.com/jhlywa/chess.js) – BSD-2-Clause, siehe `vendor/chess.js.LICENSE`
 - Eröffnungsdaten: [lichess-org/chess-openings](https://github.com/lichess-org/chess-openings) – CC0
 - Taktikaufgaben: Auswahl aus der [Lichess-Aufgabensammlung](https://database.lichess.org/#puzzles) – CC0
 - Figurensets aus [lichess-org/lila](https://github.com/lichess-org/lila) – siehe `assets/pieces/README.md`
+- Schrift für Überschriften: [Space Grotesk](https://github.com/floriankarsten/space-grotesk) – SIL Open Font License 1.1,
+  siehe `assets/fonts/SpaceGrotesk-OFL.txt` (liegt auf dem eigenen Server, keine Anfrage an Google)
 - Formeln für Gewinnwahrscheinlichkeit und Genauigkeit angelehnt an die offen dokumentierten Lichess-Formeln

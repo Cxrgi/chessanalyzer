@@ -2,12 +2,15 @@
 // und eine Live-Instanz für eigene Varianten.
 import { Chess } from '../vendor/chess.js';
 
-const ENGINE_URL = new URL('../vendor/stockfish/stockfish-19-lite-single.js', import.meta.url).href;
+const SINGLE_URL = new URL('../vendor/stockfish/stockfish-19-lite-single.js', import.meta.url).href;
+// Mehrkern-Fassung: braucht SharedArrayBuffer, also eine „cross-origin isolated“ Seite (COOP/COEP-Header).
+const MULTI_URL = new URL('../vendor/stockfish/stockfish-19-lite.js', import.meta.url).href;
 
 /** Dünne UCI-Hülle um einen Stockfish-Worker. */
 class UciWorker {
-  constructor() {
-    this.worker = new Worker(ENGINE_URL);
+  constructor(url = SINGLE_URL) {
+    this.url = url;
+    this.worker = new Worker(url);
     this.listeners = new Set();
     this.worker.onmessage = (ev) => {
       const line = typeof ev.data === 'string' ? ev.data : '';
@@ -36,16 +39,24 @@ class UciWorker {
     return Promise.race([hit, this.failed]);
   }
 
-  async init(multiPv) {
+  /**
+   * @param multiPv  Zahl der Linien
+   * @param opts     threads/hash überschreiben; timeout = so lange höchstens auf die Engine warten (ms)
+   */
+  async init(multiPv, { threads = 1, hash = ENGINE_PROFILE.hash, timeout = 0 } = {}) {
     // Der Worker lädt das WASM-Modul asynchron – „uci“ wiederholen, bis er antwortet
     this.send('uci');
     const retry = setInterval(() => this.send('uci'), 700);
+    let timer = null;
     try {
-      await this.waitFor((l) => l === 'uciok');
+      const ok = this.waitFor((l) => l === 'uciok');
+      await (timeout ? Promise.race([ok, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Die Engine antwortet nicht.')), timeout); })]) : ok);
     } finally {
       clearInterval(retry);
+      clearTimeout(timer);
     }
-    this.send(`setoption name Hash value ${ENGINE_PROFILE.hash}`);
+    if (threads > 1) this.send(`setoption name Threads value ${threads}`);
+    this.send(`setoption name Hash value ${hash}`);
     this.send(`setoption name MultiPV value ${multiPv}`);
     this.send('isready');
     await this.waitFor((l) => l === 'readyok');
@@ -112,12 +123,44 @@ async function search(uci, fen, { depth, movetime, onUpdate }) {
   return toLines(infos.filter((i) => i && i.depth >= top - 1), fen);
 }
 
-const MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.deviceMemory || 8) <= 4;
-/** Zahl der parallelen Engines und Hash-Größe – auf Handys und schwachen Geräten sparsamer. */
+const CORES = navigator.hardwareConcurrency || 2;
+const MEMORY = navigator.deviceMemory || 8; // nicht jeder Browser verrät den Speicher – dann von einem normalen PC ausgehen
+const MOBILE = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || MEMORY <= 4;
+// Mehrere Kerne für eine einzige Stellung gibt es nur, wenn der Browser es sicher erlaubt.
+// Auf Handys bleibt es bei einem Kern pro Engine (Akku, Wärme); alle anderen Geräte nutzen wie bisher die Einzelfassung.
+const CAN_THREAD = !MOBILE && CORES >= 4 && typeof SharedArrayBuffer !== 'undefined' && globalThis.crossOriginIsolated === true;
+
+/**
+ * Zahl der parallelen Engines für die Partieanalyse, Hash-Größe und Kerne für die Live-Engine –
+ * auf Handys und schwachen Geräten sparsamer, auf starken Rechnern mehr.
+ */
 export const ENGINE_PROFILE = {
-  workers: Math.max(1, Math.min(MOBILE ? 2 : 4, (navigator.hardwareConcurrency || 2) - 1)),
+  workers: Math.max(1, Math.min(MOBILE ? 2 : MEMORY >= 8 && CORES >= 8 ? 6 : 4, CORES - 1)),
   hash: MOBILE ? 16 : 32,
+  liveThreads: CAN_THREAD ? Math.min(4, CORES - 1) : 1,
+  liveHash: MOBILE ? 16 : CAN_THREAD ? 64 : 32,
 };
+
+/**
+ * Startet eine Engine für eine einzelne Stellung (Live-Analyse): wenn möglich mit mehreren Kernen,
+ * sonst – oder wenn die Mehrkern-Fassung nicht startet – mit der bewährten Einzelfassung.
+ */
+async function startSingleOrMulti(multiPv) {
+  if (ENGINE_PROFILE.liveThreads > 1) {
+    const uci = new UciWorker(MULTI_URL);
+    try {
+      await uci.init(multiPv, { threads: ENGINE_PROFILE.liveThreads, hash: ENGINE_PROFILE.liveHash, timeout: 12000 });
+      return uci;
+    } catch (e) {
+      uci.terminate();
+      ENGINE_PROFILE.liveThreads = 1;
+      ENGINE_PROFILE.liveHash = ENGINE_PROFILE.hash;
+    }
+  }
+  const uci = new UciWorker(SINGLE_URL);
+  await uci.init(multiPv, { hash: ENGINE_PROFILE.liveHash });
+  return uci;
+}
 
 // Die Analyse-Worker bleiben zwischen den Partien am Leben (das Laden der Engine kostet sonst jedes Mal Zeit).
 const workers = [];
@@ -166,6 +209,9 @@ export class AnalysisPool {
     const total = queue.length;
     let done = 0;
     const movetime = depth <= 12 ? 2500 : depth <= 16 ? 6000 : 15000;
+    // In zusammenhängenden Blöcken rechnen, innerhalb eines Blocks von hinten nach vorn: Die nächste Stellung
+    // ist dann die Vorgängerin der gerade gerechneten, und die Engine findet vieles schon in ihrer Hash-Tabelle.
+    const blocks = [];
 
     // erst starten, wenn eine vorher abgebrochene Analyse ihre Worker freigegeben hat
     const previous = lastRun;
@@ -175,14 +221,17 @@ export class AnalysisPool {
       await previous;
       if (this.cancelled) throw new Error('abgebrochen');
       this.active = await acquire(Math.min(ENGINE_PROFILE.workers, Math.max(1, total)));
+      const size = Math.max(4, Math.min(12, Math.ceil(total / (this.active.length * 2))));
+      for (let s = 0; s < queue.length; s += size) blocks.push(queue.slice(s, s + size).reverse());
       const run = async (uci) => {
-        while (queue.length && !this.cancelled) {
-          const i = queue.shift();
-          const lines = await search(uci, fens[i], { depth, movetime });
-          if (this.cancelled) return;
-          results[i] = { lines, eval: lines[0] ? lines[0].eval : { type: 'cp', value: 0 }, fresh: true };
-          done++;
-          onProgress && onProgress(done, total, i);
+        while (blocks.length && !this.cancelled) {
+          for (const i of blocks.shift()) {
+            const lines = await search(uci, fens[i], { depth, movetime });
+            if (this.cancelled) return;
+            results[i] = { lines, eval: lines[0] ? lines[0].eval : { type: 'cp', value: 0 }, fresh: true };
+            done++;
+            onProgress && onProgress(done, total, i, results[i]);
+          }
         }
       };
       await Promise.all(this.active.map(run));
@@ -213,8 +262,8 @@ export class LiveEngine {
 
   async ensure() {
     if (!this.ready) {
-      this.uci = new UciWorker();
-      this.ready = this.uci.init(3);
+      this.ready = startSingleOrMulti(3).then((uci) => { this.uci = uci; });
+      this.ready.catch(() => { this.ready = null; });
     }
     return this.ready;
   }
@@ -232,7 +281,8 @@ export class LiveEngine {
     if (this.pending && this.pending.onCancel) this.pending.onCancel();
     this.pending = { fen, depth, onUpdate, onDone, onCancel, token };
     if (this.busy) {
-      this.uci.send('stop');
+      // Startet die Engine gerade noch, übernimmt pump() den Auftrag danach von selbst.
+      if (this.uci) this.uci.send('stop');
       return;
     }
     this.pump();
@@ -240,10 +290,11 @@ export class LiveEngine {
 
   async pump() {
     this.busy = true;
+    let job = null;
     try {
       await this.ensure();
       while (this.pending) {
-        const job = this.pending;
+        job = this.pending;
         this.pending = null;
         this.uci.send(`setoption name MultiPV value ${Math.max(1, this.multipv)}`);
         const lines = await search(this.uci, job.fen, {
@@ -254,9 +305,13 @@ export class LiveEngine {
         });
         if (job.token === this.token) job.onDone && job.onDone(lines, null);
         else job.onCancel && job.onCancel();
+        job = null;
       }
     } catch (e) {
+      // Engine ließ sich nicht starten: Wartende nicht hängen lassen (z. B. „Nochmal versuchen“)
       console.error(e);
+      for (const j of [job, this.pending]) if (j && j.onCancel) j.onCancel();
+      this.pending = null;
     } finally {
       this.busy = false;
     }

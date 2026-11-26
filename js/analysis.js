@@ -87,6 +87,23 @@ function gameAccuracy(wins, accs, colors) {
   return out;
 }
 
+/**
+ * Vorläufige Genauigkeit während die Analyse noch läuft: Mittelwert über alle Züge, deren Stellung davor
+ * und danach schon gerechnet ist. Die endgültige Zahl (reviewGame) gewichtet genauer und kann etwas abweichen.
+ * @param evals  Bewertung je Stellung oder undefined, wenn noch nicht gerechnet
+ */
+export function previewAccuracy(game, evals) {
+  const sum = { w: 0, b: 0 }, cnt = { w: 0, b: 0 };
+  game.moves.forEach((m, k) => {
+    if (!evals[k] || !evals[k + 1]) return;
+    const pov = (w) => (m.color === 'w' ? w : 100 - w);
+    const loss = Math.max(0, pov(winPct(evals[k])) - pov(winPct(evals[k + 1])));
+    sum[m.color] += moveAccuracy(loss);
+    cnt[m.color]++;
+  });
+  return { w: cnt.w ? sum.w / cnt.w : null, b: cnt.b ? sum.b / cnt.b : null, moves: cnt.w + cnt.b };
+}
+
 /** Opfert der Zug Material (Figur kann mit Gewinn geschlagen werden)? */
 function sacrificeValue(fenAfter, move) {
   if (move.piece === 'k' || move.promotion) return 0;

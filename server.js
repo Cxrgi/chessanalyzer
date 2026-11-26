@@ -1,8 +1,8 @@
-// Kleiner lokaler Server: liefert die Seite aus, schützt sie mit einem Passwort
+// Kleiner lokaler Server: liefert die Seite aus, verwaltet Benutzerkonten samt Synchronisierung
 // und holt Partien von chess.com (/api/game).
-// Start: npm start  →  http://localhost:8080      (ohne Passwort: REQUIRE_LOGIN=false npm start)
+// Start: npm start  →  http://localhost:8080      (ohne Anmeldung: NO_PASSWORD=1 npm start)
 import http from 'node:http';
-import { readFile, writeFile, mkdir, rm, stat } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rm, stat, readdir } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fetchGame } from './server/proxy.mjs';
@@ -13,44 +13,50 @@ const PORT = Number(process.env.PORT) || 8080;
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml',
-  '.wasm': 'application/wasm', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8',
+  '.wasm': 'application/wasm', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8', '.woff2': 'font/woff2',
 };
 const PUBLIC = ['index.html', 'css', 'js', 'vendor', 'assets', 'data', 'sw.js', 'manifest.webmanifest'];
 
-// Passwortschutz: Der Hash liegt in .data/auth.json (nicht im Repository).
+// Anmeldung: Konten, Einstellungen und synchronisierte Stände liegen als Dateien in .data/ (nicht im Repository).
 const GATED = !process.env.NO_PASSWORD && process.env.REQUIRE_LOGIN !== 'false';
 const UNGATED = /^\/(vendor|assets|css|data)\/|^\/manifest\.webmanifest$/;
-const AUTH_FILE = join(ROOT, '.data', 'auth.json');
-const store = {
-  get: async () => {
-    try {
-      return JSON.parse(await readFile(AUTH_FILE, 'utf8'));
-    } catch (e) {
-      return null;
-    }
-  },
-  set: async (cfg) => {
-    await mkdir(join(ROOT, '.data'), { recursive: true });
-    await writeFile(AUTH_FILE, JSON.stringify(cfg));
-  },
-  delete: () => rm(AUTH_FILE, { force: true }),
-};
+const DATA_DIR = process.env.DATA_DIR || join(ROOT, '.data');
+
+/** Schlüssel-Wert-Speicher als Ordner mit einer Datei je Schlüssel. */
+function fileStore(name) {
+  const dir = join(DATA_DIR, name);
+  const file = (key) => join(dir, encodeURIComponent(key) + '.json');
+  return {
+    get: (key) => readFile(file(key), 'utf8').catch(() => null),
+    set: async (key, text) => {
+      await mkdir(dir, { recursive: true });
+      await writeFile(file(key), text);
+    },
+    delete: (key) => rm(file(key), { force: true }),
+    list: async (prefix) => (await readdir(dir).catch(() => []))
+      .filter((f) => f.endsWith('.json')).map((f) => decodeURIComponent(f.slice(0, -5))).filter((k) => k.startsWith(prefix)),
+  };
+}
+const accounts = fileStore('auth');
+const syncData = fileStore('sync');
 
 async function gate(req, res, url) {
   if (!GATED || UNGATED.test(url.pathname)) return false;
   const headers = new Headers();
   for (const [k, v] of Object.entries(req.headers)) headers.set(k, Array.isArray(v) ? v.join(', ') : v);
   let body;
-  if (req.method === 'POST') {
+  if (req.method === 'POST' || req.method === 'PUT') {
     const chunks = [];
+    let size = 0;
     for await (const c of req) {
       chunks.push(c);
-      if (chunks.reduce((n, x) => n + x.length, 0) > 10000) break;
+      size += c.length;
+      if (size > 4_000_000) break;
     }
     body = Buffer.concat(chunks);
   }
   const request = new Request(`http://${req.headers.host || 'localhost'}${req.url}`, { method: req.method, headers, body });
-  const out = await handleGate(request, { store, ip: req.socket.remoteAddress || 'local', setupToken: process.env.SETUP_TOKEN || '' });
+  const out = await handleGate(request, { kv: accounts, data: syncData, ip: req.socket.remoteAddress || 'local', setupToken: process.env.SETUP_TOKEN || '' });
   if (!out) return false;
   const h = {};
   out.headers.forEach((v, k) => { if (k !== 'set-cookie') h[k] = v; });
@@ -85,7 +91,11 @@ const server = http.createServer(async (req, res) => {
   try {
     const file = join(ROOT, rel);
     if (!(await stat(file)).isFile()) throw new Error('kein File');
-    res.writeHead(200, { 'Content-Type': MIME[extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
+    res.writeHead(200, {
+      'Content-Type': MIME[extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache',
+      // wie auf Cloudflare: Mehrkern-Engine erlauben (siehe cloudflare/worker.js)
+      'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'credentialless',
+    });
     res.end(await readFile(file));
   } catch (e) {
     res.writeHead(404, { 'Content-Type': MIME['.txt'] });

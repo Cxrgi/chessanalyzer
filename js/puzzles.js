@@ -133,6 +133,27 @@ export async function openPuzzles() {
   await nextPuzzle();
 }
 
+/** Öffnet den Aufgaben-Modus direkt mit der Tagesaufgabe (von der Startseite). */
+export function openDailyPuzzle() {
+  d.enterPuzzleView();
+  d.$('pz-theme').value = stats().theme || '';
+  return startDaily();
+}
+
+/** Öffnet Aufgaben zu einem bestimmten Thema (z. B. einer Schwäche aus den eigenen Partien). */
+export function openPuzzleTheme(theme) {
+  const s = stats();
+  s.theme = FILTERS.includes(theme) ? theme : '';
+  save(s);
+  return openPuzzles();
+}
+
+/** Ob die heutige Tagesaufgabe schon erledigt ist und wie lang die Serie gelöster Aufgaben ist. */
+export function dailyState() {
+  const s = stats();
+  return { done: s.daily === today(), streak: s.streak || 0 };
+}
+
 /** Tagesaufgabe: jeden Tag dieselbe für alle, mittlere Schwierigkeit, ohne Wertung. */
 async function startDaily() {
   stopRush(true);

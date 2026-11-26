@@ -1,0 +1,11 @@
+# Die frühere Adresse chessanalyzer-cxrgi.netlify.app leitet nur noch weiter:
+# jede Adresse (auch /admin und Links mit #…) auf dieselbe Adresse unter chessanalyzer.cxrgi.workers.dev.
+# Veröffentlicht wird dieser Ordner (nicht das ganze Repository) – nur nötig, falls sich das Ziel einmal ändert.
+[build]
+  publish = "public"
+
+[[redirects]]
+  from = "/*"
+  to = "https://chessanalyzer.cxrgi.workers.dev/:splat"
+  status = 301
+  force = true

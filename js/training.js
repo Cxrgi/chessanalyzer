@@ -2,6 +2,7 @@
 // in wachsenden Abständen (Leitner-Prinzip), bis sie sitzen.
 import { Chess } from '../vendor/chess.js';
 import { db } from './db.js';
+import { touch, forget } from './sync.js';
 import { winPct, CLASSES } from './analysis.js';
 
 /** Abstand bis zur nächsten Wiederholung je Stufe, in Tagen. */
@@ -20,6 +21,7 @@ export function initTraining(deps) {
   d.$('tr-drop').onclick = async () => {
     if (!T.card) return;
     await db.del('cards', T.card.id);
+    forget('c', T.card.id);
     next();
   };
 }
@@ -127,7 +129,9 @@ async function answer(ok, showSolution, text) {
   c.seen = (c.seen || 0) + 1;
   c.box = firstTry ? Math.min(INTERVALS.length - 1, c.box + 1) : 0;
   c.due = Date.now() + (firstTry ? INTERVALS[c.box] * DAY : 10 * 60000);
+  c.mod = Date.now();
   await db.set('cards', c.id, c).catch(() => {});
+  touch();
   if (!firstTry && !T.queue.includes(c) && T.queue.length < 30) T.queue.push({ ...c, retry: true });
   d.playSound(ok ? 'end' : 'move');
   d.onCard && d.onCard(firstTry);

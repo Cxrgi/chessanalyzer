@@ -259,7 +259,7 @@ async function fetchJson(url, { timeout = 12000 } = {}) {
 
 const callbackUrl = (type, id) => `https://www.chess.com/callback/${type}/game/${id}`;
 
-/** Eigener Proxy (server.js bzw. Netlify-Funktion). Auf rein statischem Hosting nicht vorhanden. */
+/** Eigener Proxy (server.js bzw. Cloudflare Worker). Auf rein statischem Hosting nicht vorhanden. */
 let proxyMissing = false;
 async function viaOwnProxy(type, id) {
   if (proxyMissing) throw new Error('kein Proxy');

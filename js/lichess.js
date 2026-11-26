@@ -37,8 +37,27 @@ const SPEED = { ultraBullet: 'bullet', bullet: 'bullet', blitz: 'blitz', rapid: 
 
 /** Die letzten Partien eines Lichess-Spielers als einheitliche Listeneinträge. */
 export async function fetchLichessGames(username, max = 40) {
-  const text = await get(`https://lichess.org/api/games/user/${encodeURIComponent(username)}?max=${max}&clocks=true&opening=true&pgnInJson=true&perfType=ultraBullet,bullet,blitz,rapid,classical,correspondence`, 'application/x-ndjson');
-  return text.split('\n').filter(Boolean).map((line) => JSON.parse(line)).filter((g) => g.variant === 'standard' && g.pgn).map((g) => {
+  let text;
+  try {
+    text = await get(`https://lichess.org/api/games/user/${encodeURIComponent(username)}?max=${max}&clocks=true&opening=true&pgnInJson=true&perfType=ultraBullet,bullet,blitz,rapid,classical,correspondence`, 'application/x-ndjson');
+  } catch (e) {
+    if (e.code !== 'notfound') throw e;
+    // Gibt es den Namen überhaupt? Das Profil ist auch dann abrufbar, wenn Lichess die Partieliste nicht herausgibt.
+    const exists = await fetch(`https://lichess.org/api/user/${encodeURIComponent(username)}`, { headers: { Accept: 'application/json' } })
+      .then((r) => (r.status === 404 ? false : r.ok ? true : null)).catch(() => null);
+    if (exists === false) throw new LoadError('notfound', `Einen Lichess-Spieler „${username}“ gibt es nicht. Prüfe die Schreibweise.`);
+    throw new LoadError('network', 'Lichess gibt die Partieliste gerade nicht heraus. Öffne die Partie stattdessen über ihren Link.');
+  }
+  // Eine Zeile pro Partie; eine unvollständige letzte Zeile (Abbruch) wird übersprungen
+  const games = [];
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      games.push(JSON.parse(line));
+    } catch (e) { /* unvollständige Zeile */ }
+  }
+  const variantOf = (g) => (g.variant && typeof g.variant === 'object' ? g.variant.key : g.variant);
+  return games.filter((g) => variantOf(g) === 'standard' && g.pgn).sort((a, b) => (b.lastMoveAt || b.createdAt || 0) - (a.lastMoveAt || a.createdAt || 0)).map((g) => {
     const side = (c) => ({ name: (g.players[c].user && g.players[c].user.name) || (g.players[c].aiLevel ? `Stockfish Stufe ${g.players[c].aiLevel}` : 'Anonym'), rating: g.players[c].rating || null });
     return {
       id: 'lichess-' + g.id, white: side('white'), black: side('black'),

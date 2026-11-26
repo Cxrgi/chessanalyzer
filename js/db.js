@@ -2,7 +2,7 @@
 // und Trainingskarten. Anders als localStorage gibt es hier praktisch keine Größengrenze.
 // Steht IndexedDB nicht zur Verfügung (z. B. privates Fenster), wird nur im Arbeitsspeicher gehalten.
 const NAME = 'chessanalyzer';
-const STORES = ['games', 'meta', 'evals', 'cards'];
+const STORES = ['games', 'meta', 'evals', 'cards', 'notes'];
 let opening = null;
 const memory = new Map(STORES.map((s) => [s, new Map()]));
 
@@ -10,7 +10,7 @@ function open() {
   if (!opening) {
     opening = new Promise((resolve) => {
       try {
-        const req = indexedDB.open(NAME, 1);
+        const req = indexedDB.open(NAME, 2); // Version 2: Speicher „notes“ (eigene Varianten und Notizen)
         req.onupgradeneeded = () => {
           for (const s of STORES) if (!req.result.objectStoreNames.contains(s)) req.result.createObjectStore(s);
         };
