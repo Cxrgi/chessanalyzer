@@ -73,6 +73,12 @@ export function initPlay(deps) {
 }
 
 /** Öffnet den Bereich mit der Auswahl von Stufe und Farbe. */
+/** Wie viele Endspiel-Aufgaben schon geschafft sind (für die Trainieren-Seite). */
+export function endgameSummary() {
+  const done = d ? d.store.get('endgames', {}) : {};
+  return { done: ENDGAMES.filter((e) => done[e.id]).length, total: ENDGAMES.length };
+}
+
 export function openPlay() {
   d.enterPlayView();
   showSetup();

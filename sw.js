@@ -1,6 +1,6 @@
 // Service Worker: macht die Seite offline nutzbar und spart Anfragen an den Server.
 // Bei jeder Veröffentlichung VERSION ändern – dann holen sich alle Geräte die neuen Dateien.
-const VERSION = '2026-11-25b';
+const VERSION = '2026-11-26a';
 const CACHE = 'ca-' + VERSION;
 const DAY = 24 * 60 * 60 * 1000;
 

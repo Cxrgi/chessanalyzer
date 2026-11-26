@@ -18,7 +18,7 @@ const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml',
   '.png': 'image/png', '.wasm': 'application/wasm', '.webmanifest': 'application/manifest+json; charset=utf-8',
-  '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.ico': 'image/x-icon', '.webp': 'image/webp',
+  '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8', '.ico': 'image/x-icon', '.webp': 'image/webp', '.woff2': 'font/woff2',
 };
 if (!ACCOUNT || !TOKEN) throw new Error('CLOUDFLARE_ACCOUNT_ID und CLOUDFLARE_API_TOKEN setzen');
 const api = (path, init = {}) => fetch(`https://api.cloudflare.com/client/v4/accounts/${ACCOUNT}/storage/kv/namespaces/${NAMESPACE}${path}`, {

@@ -11,7 +11,12 @@ Nicht mit Chess.com verbunden. Die komplette Analyse läuft im Browser auf deine
 
 - **Benutzerkonten** mit eigenem Stand je Person, **Synchronisierung** zwischen allen Geräten und eine
   **Verwaltung** für den Betreiber
-- **Startseite** mit allen Bereichen auf einen Blick
+- **Aufgeräumte Oberfläche**: Navigation links (am Handy unten) mit fünf Bereichen – *Heute* (Startseite mit
+  Tagesaufgabe, fälligem Fehler-Training, nächster Lektion, zuletzt analysierten Partien und Wochenbilanz),
+  *Analysieren*, *Trainieren* (alle Übungsarten plus Schwächen aus den eigenen Partien), *Lernen* und *Spielen*
+- **Analyse-Ansicht** mit Steuerleiste und Werkzeugen (Schlüsselmoment, Drehen, Drohung, Tiefer, Notiz) direkt unter
+  dem Brett und den Reitern *Coach*, *Züge* und *Überblick*; am Handy bleibt die Steuerleiste immer unten erreichbar
+- **Einstellungen nach Themen** (Darstellung, Brett & Figuren, Analyse & Coach, Ton, Konto, Hilfe) mit Suche
 - **Taktikaufgaben**: rund 13 500 Aufgaben von leicht bis schwer, automatisch passend zur eigenen Wertung –
   mit Wertungszahl, Serie, Statistik, Tipp, vorgespielter Lösung und Themen-Training (Gabel, Fesselung, Matt in 2 …)
 - **Lektionen**: 53 kurze, interaktive Lektionen in neun Kursen – Grundlagen, Taktik, Mattbilder, Eröffnung, Endspiel,
@@ -217,4 +222,6 @@ vendor/               Stockfish und chess.js
 - Eröffnungsdaten: [lichess-org/chess-openings](https://github.com/lichess-org/chess-openings) – CC0
 - Taktikaufgaben: Auswahl aus der [Lichess-Aufgabensammlung](https://database.lichess.org/#puzzles) – CC0
 - Figurensets aus [lichess-org/lila](https://github.com/lichess-org/lila) – siehe `assets/pieces/README.md`
+- Schrift für Überschriften: [Space Grotesk](https://github.com/floriankarsten/space-grotesk) – SIL Open Font License 1.1,
+  siehe `assets/fonts/SpaceGrotesk-OFL.txt` (liegt auf dem eigenen Server, keine Anfrage an Google)
 - Formeln für Gewinnwahrscheinlichkeit und Genauigkeit angelehnt an die offen dokumentierten Lichess-Formeln

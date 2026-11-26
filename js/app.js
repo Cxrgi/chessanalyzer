@@ -1,10 +1,10 @@
 // Hauptlogik: Partie laden → analysieren → Übersicht → Zug für Zug mit Coach.
 import { Chess } from '../vendor/chess.js';
 import { openEditor, bindEditor } from './editor.js';
-import { initPuzzles, openPuzzles, puzzleTargets, puzzleMove, puzzleKey, puzzleSummary, leavePuzzles, themeName } from './puzzles.js';
+import { initPuzzles, openPuzzles, openDailyPuzzle, openPuzzleTheme, dailyState, puzzleTargets, puzzleMove, puzzleKey, puzzleSummary, leavePuzzles, themeName } from './puzzles.js';
 import { initTraining, openTraining, trainingTargets, trainingMove, trainingKey, trainingSummary, leaveTraining } from './training.js';
 import { initProfile, renderProfile, renderSyncStatus, dayStreak, TAGS } from './profile.js';
-import { initPlay, openPlay, playTargets, playMove, leavePlay } from './play.js';
+import { initPlay, openPlay, endgameSummary, playTargets, playMove, leavePlay } from './play.js';
 import { initTrainers, openTrainers, trainerTargets, trainerMove, trainerSummary, leaveTrainers, prefillRepertoire } from './trainers.js';
 import { getRepertoire, checkRepertoire } from './repertoire.js';
 import { initLessons, renderLessonList, openLesson, lessonTargets, lessonMove, lessonKey, lessonProgress } from './lessons.js';
@@ -57,7 +57,12 @@ const OPTIONS = [
   ['lines', 'Engine-Linien', { 0: 'Aus', 1: '1', 2: '2', 3: '3', 5: '5' }],
   ['palette', 'Farben der Zugbewertung', { normal: 'Standard', safe: 'Für Farbenblinde' }],
 ];
-const TOGGLES = [['anim', 'Figuren gleiten lassen'], ['dots', 'Mögliche Züge als Punkte zeigen'], ['lastMove', 'Letzten Zug farbig markieren']];
+const TOGGLES = [
+  ['anim', 'Figuren gleiten lassen', 'Aus = Züge springen sofort'],
+  ['dots', 'Mögliche Züge als Punkte zeigen'],
+  ['lastMove', 'Letzten Zug farbig markieren'],
+  ['sound', 'Töne bei Zügen', 'Auch über den Lautsprecher-Knopf in der Navigation'],
+];
 const DEFAULTS = { theme: 'green', pieces: 'cburnett', depth: 16, sound: true, volume: 0.7, mode: 'dark', size: 'auto', notation: 'de', strict: 'normal', lines: 3, palette: 'normal', anim: true, dots: true, lastMove: true };
 
 // ---------------------------------------------------------------------------
@@ -169,9 +174,10 @@ function afterSync() {
   $('user-input').value = S.username;
   $('site-input').value = S.site;
   if (S.view === 'hub') {
-    renderHistory();
-    renderHub();
-  } else if (S.view === 'profile') renderProfile();
+    renderHistory().then(() => { if (S.view === 'hub') renderHub(); });
+  } else if (S.view === 'home') renderHistory();
+  else if (S.view === 'trainhub') renderTrainHub();
+  else if (S.view === 'profile') renderProfile();
   else if (S.mode === 'game' && S.review) {
     const game = S.game;
     loadAnnot(game).then((a) => {
@@ -225,18 +231,16 @@ function bindSwipe() {
 }
 
 function buildStaticIcons() {
-  $('btn-settings').innerHTML = uiIcon('gear', 20);
+  $('ico-settings').innerHTML = uiIcon('gear', 20);
+  $('m-settings').innerHTML = uiIcon('gear', 20);
   $('settings-close').innerHTML = uiIcon('close', 18);
   $('games-close').innerHTML = uiIcon('close', 18);
-  $('ctl-overview').innerHTML = uiIcon('chart', 20);
   $('ctl-first').innerHTML = uiIcon('first', 20);
   $('ctl-prev').innerHTML = uiIcon('prev', 22);
   $('ctl-next').innerHTML = uiIcon('next', 22);
   $('ctl-last').innerHTML = uiIcon('last', 20);
-  $('ctl-flip').innerHTML = uiIcon('flip', 20);
-  $('ctl-key').innerHTML = uiIcon('star', 20);
-  $('btn-logout').innerHTML = uiIcon('logout', 20);
-  document.querySelectorAll('[data-ico]').forEach((el) => { el.innerHTML = uiIcon(el.dataset.ico, 24); });
+  $('ico-logout').innerHTML = uiIcon('logout', 20);
+  document.querySelectorAll('[data-ico]').forEach((el) => { el.innerHTML = uiIcon(el.dataset.ico, el.classList.contains('tool-ico') ? 20 : 24); });
 }
 
 /** byUser = true, wenn der Nutzer gerade selbst etwas umgestellt hat (nur dann wird es an andere Geräte weitergegeben). */
@@ -260,38 +264,55 @@ function applySettings(byUser = false) {
   root.classList.toggle('no-dots', !S.settings.dots);
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.content = light ? '#eef1f5' : '#11151b';
-  $('btn-sound').innerHTML = uiIcon(S.settings.sound ? 'sound' : 'mute', 20);
+  $('ico-sound').innerHTML = uiIcon(S.settings.sound ? 'sound' : 'mute', 20);
+  $('sound-label').textContent = $('btn-sound').title = S.settings.sound ? 'Ton an' : 'Ton aus';
+  $('btn-sound').setAttribute('aria-pressed', String(!!S.settings.sound));
   store.set('settings', S.settings, !byUser);
   if (S.view !== 'home' && S.game) renderPlayers();
 }
 
 function buildSettingsDialog() {
+  const opt = (key) => OPTIONS.find((o) => o[0] === key);
+  const seg = ([key, title, choices], hint = '') =>
+    `<div class="set-item" data-k="${key}"><h4>${title}</h4><div class="seg n${Object.keys(choices).length}">` + Object.entries(choices).map(([v, name]) =>
+      `<button type="button" class="${String(S.settings[key]) === v ? 'on' : ''}" data-opt="${key}" data-value="${v}" aria-pressed="${String(S.settings[key]) === v}">${name}</button>`).join('')
+    + `</div>${hint ? `<p class="hint">${hint}</p>` : ''}</div>`;
+  const toggle = (key) => {
+    const [, title, hint] = TOGGLES.find((t) => t[0] === key) || [key, key];
+    return `<label class="set-item set-toggle" data-k="${key}"><span><b>${title}</b>${hint ? `<small>${hint}</small>` : ''}</span><input type="checkbox" data-toggle="${key}" ${S.settings[key] ? 'checked' : ''}></label>`;
+  };
   const draw = () => {
     $('set-theme').innerHTML = Object.entries(THEMES).map(([k, t]) =>
-      `<button type="button" class="swatch ${k === S.settings.theme ? 'on' : ''}" data-theme="${k}">
+      `<button type="button" class="swatch ${k === S.settings.theme ? 'on' : ''}" data-theme="${k}" aria-pressed="${k === S.settings.theme}">
         <i style="background-image:repeating-conic-gradient(${t.dark} 0 25%, ${t.light} 0 50%)"></i>${t.name}</button>`).join('');
     $('set-pieces').innerHTML = Object.entries(PIECE_SETS).map(([k, name]) =>
-      `<button type="button" class="swatch ${k === S.settings.pieces ? 'on' : ''}" data-pieces="${k}">
+      `<button type="button" class="swatch ${k === S.settings.pieces ? 'on' : ''}" data-pieces="${k}" aria-pressed="${k === S.settings.pieces}">
         <i class="pc" style="background-image:url('assets/pieces/${k}/wN.svg')"></i>${name}</button>`).join('');
     $('set-depth').innerHTML = Object.entries(DEPTHS).map(([d, name]) =>
-      `<button type="button" class="${+d === S.settings.depth ? 'on' : ''}" data-depth="${d}">${name}</button>`).join('');
-    $('set-more').innerHTML = OPTIONS.map(([key, title, choices]) =>
-      `<h3>${title}</h3><div class="seg n${Object.keys(choices).length}">` + Object.entries(choices).map(([v, name]) =>
-        `<button type="button" class="${String(S.settings[key]) === v ? 'on' : ''}" data-opt="${key}" data-value="${v}">${name}</button>`).join('') + '</div>').join('')
-      + '<h3>Brett und Ton</h3>'
-      + TOGGLES.map(([key, title]) => `<label class="toggle"><input type="checkbox" data-toggle="${key}" ${S.settings[key] ? 'checked' : ''}> ${title}</label>`).join('')
-      + `<label class="toggle range">Lautstärke <input type="range" id="set-volume" min="0" max="1" step="0.05" value="${S.settings.volume}"></label>`;
+      `<button type="button" class="${+d === S.settings.depth ? 'on' : ''}" data-depth="${d}" aria-pressed="${+d === S.settings.depth}">${name}</button>`).join('');
+    $('set-look').innerHTML = seg(opt('mode'), '„System-Standard“ folgt der Einstellung von Handy oder Computer.') + seg(opt('size'))
+      + seg(opt('notation')) + seg(opt('palette')) + toggle('anim');
+    $('set-board').innerHTML = toggle('dots') + toggle('lastMove');
+    $('set-engine').innerHTML = seg(opt('strict'), 'Nachsichtig hilft Anfängern, Streng ist für Fortgeschrittene.') + seg(opt('lines'));
+    $('set-sound').innerHTML = toggle('sound')
+      + `<label class="set-item set-toggle range" data-k="lautstärke"><span><b>Lautstärke</b></span><input type="range" id="set-volume" min="0" max="1" step="0.05" value="${S.settings.volume}"></label>`;
+    filterSettings();
   };
   draw();
   drawSettings = draw;
   $('settings').addEventListener('change', (e) => {
     const t = e.target;
-    if (t.dataset.toggle) S.settings[t.dataset.toggle] = t.checked;
-    else if (t.id === 'set-volume') {
+    if (t.dataset.toggle) {
+      S.settings[t.dataset.toggle] = t.checked;
+      if (t.dataset.toggle === 'sound' && t.checked && !+S.settings.volume) S.settings.volume = 0.7;
+      if ($('set-volume')) $('set-volume').value = S.settings.volume;
+    } else if (t.id === 'set-volume') {
       S.settings.volume = +t.value;
       S.settings.sound = S.settings.volume > 0;
     } else return;
     applySettings(true);
+    const cb = $('settings').querySelector('[data-toggle="sound"]');
+    if (cb) cb.checked = S.settings.sound;
     if (t.id === 'set-volume') playSound('move');
     refreshAfterSettings();
   });
@@ -299,6 +320,11 @@ function buildSettingsDialog() {
     const b = e.target.closest('button');
     if (e.target === $('settings')) $('settings').close();
     if (!b) return;
+    if (b.dataset.cat) {
+      $('set-search').value = '';
+      setSettingsCat(b.dataset.cat);
+      return;
+    }
     if (b.dataset.theme) S.settings.theme = b.dataset.theme;
     else if (b.dataset.pieces) S.settings.pieces = b.dataset.pieces;
     else if (b.dataset.depth) S.settings.depth = +b.dataset.depth;
@@ -308,11 +334,72 @@ function buildSettingsDialog() {
     draw();
     refreshAfterSettings(b.dataset.opt);
   });
+  $('set-search').addEventListener('input', filterSettings);
+  $('set-cats').addEventListener('keydown', (e) => {
+    if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+    e.preventDefault();
+    const cats = [...$('set-cats').querySelectorAll('[data-cat]')].filter((c) => !c.hidden);
+    const i = cats.indexOf(document.activeElement);
+    const c = cats[(i + (e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : cats.length - 1)) % cats.length];
+    $('set-search').value = '';
+    setSettingsCat(c.dataset.cat);
+    c.focus();
+  });
   $('btn-keys').onclick = () => { $('settings').close(); $('keys').showModal(); };
   $('keys-close').onclick = () => $('keys').close();
   $('keys').addEventListener('click', (e) => { if (e.target === $('keys')) $('keys').close(); });
-  $('btn-settings').onclick = () => $('settings').showModal();
+  $('btn-settings').onclick = $('m-settings').onclick = () => openSettings();
   $('settings-close').onclick = () => $('settings').close();
+}
+
+/** Öffnet die Einstellungen (optional gleich bei einem Thema). */
+function openSettings(cat) {
+  $('set-search').value = '';
+  $('set-cats').querySelector('[data-cat="account"]').hidden = $('acc-box').dataset.ready !== '1';
+  drawSettings();
+  setSettingsCat(cat || S.setCat || 'look');
+  $('settings').showModal();
+  $('set-body').scrollTop = 0;
+}
+
+function setSettingsCat(cat) {
+  if (cat === 'account' && $('acc-box').dataset.ready !== '1') cat = 'look';
+  S.setCat = cat;
+  for (const c of $('set-cats').querySelectorAll('[data-cat]')) {
+    c.classList.toggle('on', c.dataset.cat === cat);
+    c.setAttribute('aria-selected', String(c.dataset.cat === cat));
+    c.tabIndex = c.dataset.cat === cat ? 0 : -1;
+  }
+  filterSettings();
+  $('set-body').scrollTop = 0;
+}
+
+/** Suche in den Einstellungen: zeigt über alle Themen hinweg nur passende Einträge. */
+function filterSettings() {
+  const q = $('set-search').value.trim().toLowerCase();
+  const body = $('set-body');
+  body.classList.toggle('searching', !!q);
+  let any = false;
+  for (const sec of body.querySelectorAll('.set-sec')) {
+    if (sec.id === 'acc-box' && $('acc-box').dataset.ready !== '1') { sec.hidden = true; continue; }
+    if (!q) {
+      sec.hidden = sec.dataset.cat !== (S.setCat || 'look');
+      sec.querySelectorAll('.set-item').forEach((it) => { it.hidden = false; });
+      continue;
+    }
+    let hit = false;
+    const items = sec.querySelectorAll('.set-item');
+    for (const it of items) {
+      const match = (it.textContent + ' ' + (it.dataset.k || '')).toLowerCase().includes(q);
+      it.hidden = !match;
+      hit = hit || match;
+    }
+    // Ohne einzelne Einträge (Konto): auf den ganzen Abschnitt schauen
+    if (!items.length) hit = sec.textContent.toLowerCase().includes(q);
+    sec.hidden = !hit;
+    any = any || hit;
+  }
+  $('set-empty').hidden = !q || any;
 }
 
 /** Zeichnet neu, was von einer geänderten Einstellung abhängt (Notation, Strenge, Farben …). */
@@ -380,20 +467,7 @@ function bindEvents() {
     S.gamesList.filter[c.dataset.key] = c.dataset.value;
     renderGamesList();
   });
-  $('btn-new').onclick = goHome;
-  $('btn-board').onclick = () => openBoard(S.mode === 'game' && S.view === 'moves' ? currentFen() : null);
-  document.querySelector('.tiles').addEventListener('click', (e) => {
-    const t = e.target.closest('.tile');
-    if (!t) return;
-    const go = t.dataset.go;
-    if (['analyse', 'lektionen', 'brett', 'aufgaben', 'spielen', 'training', 'profil', 'trainer'].includes(go)) location.hash = '#' + go;
-    else if (go === 'editor') { openBoard(); showEditor(currentFen()); }
-    else if (go === 'demo') startGame(gameFromPgn(DEMO_PGN));
-    else if (go === 'recent') {
-      location.hash = '#analyse';
-      setTimeout(() => (S.username ? showRecentGames(S.username) : $('user-input').focus()), 50);
-    }
-  });
+  bindShell();
   $('lessons-search').addEventListener('input', (e) => renderLessonList(e.target.value));
   $('new-games').addEventListener('click', (e) => {
     const b = e.target.closest('button');
@@ -418,10 +492,6 @@ function bindEvents() {
       }
     }
   });
-  $('hub-continue').onclick = () => {
-    const { next } = lessonProgress();
-    if (next) location.hash = '#lektion/' + next.id;
-  };
   $('bt-edit').onclick = () => showEditor(currentFen());
   $('bt-reset').onclick = () => openBoard(START_FEN);
   $('bt-fen').onclick = (e) => copyText(currentFen(), e.currentTarget);
@@ -441,7 +511,6 @@ function bindEvents() {
     store.set('boardArrow', e.target.checked);
     renderBoard(false);
   };
-  $('brand').onclick = (e) => { e.preventDefault(); goHome(); };
   $('btn-sound').onclick = () => {
     S.settings.sound = !S.settings.sound;
     applySettings(true);
@@ -449,7 +518,10 @@ function bindEvents() {
   };
   $('btn-cancel').onclick = goHome;
   $('btn-start').onclick = () => { showMoves(); go(0); };
-  $('ctl-overview').onclick = showOverview;
+  $('ptabs').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-ptab]');
+    if (b) switchPanelTab(b.dataset.ptab);
+  });
   $('ctl-first').onclick = () => (S.mode === 'board' ? boardGo(0) : go(0));
   $('ctl-prev').onclick = prev;
   $('ctl-next').onclick = next;
@@ -568,6 +640,7 @@ function bindEvents() {
     else prev();
   }, { passive: false });
   $('mt-bad').onclick = toggleOnlyBad;
+  $('mt-board').onclick = () => openBoard(currentFen());
   $('variation').addEventListener('click', (e) => { if (e.target.closest('#v-save')) saveVariation(); });
   $('mt-note').onclick = () => {
     S.noteOpen = S.noteOpen === S.ply ? null : S.ply;
@@ -795,19 +868,19 @@ function timeClassName(tc) {
 async function renderHistory() {
   const metas = (await db.all('meta').catch(() => [])).map((e) => e.value).sort((x, y) => (y.fav ? 1 : 0) - (x.fav ? 1 : 0) || y.at - x.at);
   S.metas = metas;
+  renderHubRecent(metas);
   $('history-card').hidden = !metas.length;
-  const shown = S.historyAll ? metas : metas.slice(0, 8);
-  $('history-list').innerHTML = shown.map((h) => {
-    const mine = h.you ? h.acc && h.acc[h.you] : null;
-    const res = !h.you ? 'draw' : (h.result === '1/2-1/2' ? 'draw' : (h.result === '1-0') === (h.you === 'w') ? 'win' : 'loss');
-    const letter = h.you ? { win: 'S', loss: 'N', draw: 'R' }[res] : (h.result === '1-0' ? '1' : h.result === '0-1' ? '0' : '½');
-    const info = [h.opening, mine != null ? `${mine.toFixed(0)} % genau` : '', h.date ? h.date.split('-').reverse().join('.') : ''].filter(Boolean).join(' · ');
-    return `<li class="hist-row"><button type="button" class="game-item" data-id="${esc(h.id)}">
-      <span class="game-res ${res}">${letter}</span>
-      <span class="game-names">${esc(h.white)} – ${esc(h.black)}<small class="game-sub">${esc(info)}</small></span></button>
-      <button type="button" class="icon-btn hist-fav ${h.fav ? 'on' : ''}" data-fav="${esc(h.id)}" title="Merken" aria-label="Partie merken">${uiIcon('star', 16)}</button>
-      <button type="button" class="icon-btn" data-del="${esc(h.id)}" title="Löschen" aria-label="Partie löschen">${uiIcon('trash', 16)}</button></li>`;
-  }).join('') + (metas.length > 8 && !S.historyAll ? `<li><button type="button" class="game-item more" data-more="1">Alle ${metas.length} Partien anzeigen</button></li>` : '');
+  const favs = metas.filter((m) => m.fav).length;
+  if (!favs) S.historyFilter = 'all';
+  const filter = S.historyFilter || 'all';
+  $('history-filter').innerHTML = favs ? [['all', `Alle (${metas.length})`], ['fav', `Gemerkt (${favs})`]]
+    .map(([k, label]) => `<button type="button" class="chip ${filter === k ? 'on' : ''}" data-hf="${k}" aria-pressed="${filter === k}">${label}</button>`).join('') : '';
+  const pool = filter === 'fav' ? metas.filter((m) => m.fav) : metas;
+  const shown = S.historyAll ? pool : pool.slice(0, 8);
+  $('history-list').innerHTML = shown.map((h) => `<li class="hist-row">${gameRow(h)}
+      <button type="button" class="icon-btn hist-fav ${h.fav ? 'on' : ''}" data-fav="${esc(h.id)}" title="Merken" aria-label="Partie merken" aria-pressed="${!!h.fav}">${uiIcon('star', 16)}</button>
+      <button type="button" class="icon-btn" data-del="${esc(h.id)}" title="Löschen" aria-label="Partie löschen">${uiIcon('trash', 16)}</button></li>`).join('')
+    + (pool.length > 8 && !S.historyAll ? `<li><button type="button" class="game-item more" data-more="1">Alle ${pool.length} Partien anzeigen</button></li>` : '');
   $('history-list').onclick = async (e) => {
     const fav = e.target.closest('[data-fav]'), del = e.target.closest('[data-del]');
     if (fav) {
@@ -894,6 +967,24 @@ async function routeFromHash() {
     openTraining();
     return;
   }
+  if (id === 'trainieren') {
+    showTrainHub();
+    return;
+  }
+  if (id === 'endspiele') {
+    // Endspiele liegen im Spielen-Bereich; dorthin springen und die Liste zeigen
+    leaveModes();
+    S.navHint = 'training';
+    openPlay();
+    updateNav();
+    requestAnimationFrame(() => $('play-endgames').scrollIntoView({ block: 'start', behavior: 'smooth' }));
+    return;
+  }
+  if (id === 'aufgaben/tag') {
+    leaveModes();
+    openDailyPuzzle();
+    return;
+  }
   if (id === 'profil') {
     leaveModes();
     S.view = 'profile';
@@ -917,7 +1008,12 @@ async function routeFromHash() {
     return;
   }
   if (id === 'aufgaben') {
-    if (S.mode !== 'puzzle') {
+    const theme = S.pendingTheme;
+    S.pendingTheme = null;
+    if (theme != null) {
+      leaveModes();
+      openPuzzleTheme(theme);
+    } else if (S.mode !== 'puzzle') {
       leaveModes();
       openPuzzles();
     }
@@ -972,14 +1068,141 @@ function keepAwake() {
   return { release() { released = true; if (lock) lock.release().catch(() => {}); } };
 }
 
-/** Zeigt genau einen Hauptbereich: hub | home | lessons | review. */
+const MAINS = ['hub', 'home', 'trainhub', 'lessons', 'profile', 'review'];
+const NAV_TITLE = { heute: 'Heute', analyse: 'Analysieren', training: 'Trainieren', lernen: 'Lernen', spielen: 'Spielen', profil: 'Mein Profil' };
+
+/** Zeigt genau einen Hauptbereich: hub | home | trainhub | lessons | profile | review. */
 function showMain(name) {
-  for (const id of ['hub', 'home', 'lessons', 'profile', 'review']) $(id).hidden = id !== name;
-  $('btn-new').hidden = $('btn-board').hidden = name === 'hub';
+  for (const id of MAINS) $(id).hidden = id !== name;
+  document.body.dataset.main = name;
+  updateNav();
+}
+
+/** Markiert in der Navigation (links bzw. unten) den Bereich, in dem man gerade ist. */
+function updateNav() {
+  const main = MAINS.find((id) => !$(id).hidden) || 'hub';
+  const key = { hub: 'heute', home: 'analyse', trainhub: 'training', lessons: 'lernen', profile: 'profil' }[main]
+    || S.navHint
+    || { game: 'analyse', board: 'analyse', lesson: 'lernen', puzzle: 'training', training: 'training', trainer: 'training', play: 'spielen' }[S.mode]
+    || 'analyse';
+  document.querySelectorAll('[data-nav]').forEach((a) => {
+    const on = a.dataset.nav === key;
+    a.classList.toggle('on', on);
+    if (on) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  });
+  $('m-profile').classList.toggle('on', key === 'profil');
+  $('mtop-title').textContent = NAV_TITLE[key] || 'Chess Analyzer';
+}
+
+/** Navigation, Startseite „Heute“, Analysieren- und Trainieren-Seite. */
+function bindShell() {
+  // „Heute“ und Logo führen ohne Umweg über die Adresszeile zur Startseite
+  for (const el of [$('brand'), $('m-brand'), ...document.querySelectorAll('[data-nav="heute"]')]) {
+    el.addEventListener('click', (e) => {
+      if (e.button || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      e.preventDefault();
+      goHome();
+    });
+  }
+  // Nochmal auf den Bereich tippen, in dem man schon ist: nach oben scrollen
+  document.querySelectorAll('a[data-nav]').forEach((a) => a.addEventListener('click', () => {
+    if (a.getAttribute('href') === location.hash) window.scrollTo({ top: 0, behavior: 'smooth' });
+  }));
+  $('hub-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = $('hub-input').value.trim();
+    if (!text) {
+      $('hub-input').focus();
+      return;
+    }
+    $('hub-input').value = '';
+    history.pushState(null, '', '#analyse');
+    showAnalyze();
+    $('game-input').value = text;
+    $('game-input').dispatchEvent(new Event('input'));
+    submitInput();
+  });
+  $('hub-input').addEventListener('paste', () => setTimeout(() => {
+    if (parseGameLink($('hub-input').value) || parseLichessLink($('hub-input').value)) $('hub-form').requestSubmit();
+  }, 0));
+  $('hub-file').onclick = () => $('pgn-file').click();
+  $('hub-demo').onclick = $('hub-demo2').onclick = () => startGame(gameFromPgn(DEMO_PGN));
+  $('go-editor').onclick = () => { openBoard(); showEditor(currentFen()); };
+  $('today').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-go]');
+    if (b) location.hash = '#' + b.dataset.go;
+  });
+  $('hub-recent').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-id]');
+    if (b) location.hash = '#' + b.dataset.id;
+  });
+  $('train-grid').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-go]');
+    if (b) location.hash = '#' + b.dataset.go;
+  });
+  $('weak-chips').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-theme]');
+    if (!b) return;
+    S.pendingTheme = b.dataset.theme;
+    location.hash = '#aufgaben';
+  });
+  $('history-filter').addEventListener('click', (e) => {
+    const c = e.target.closest('[data-hf]');
+    if (!c) return;
+    S.historyFilter = c.dataset.hf;
+    renderHistory();
+  });
+}
+
+/** Seite „Trainieren“: alle Übungsarten auf einen Blick, dazu die Schwächen aus den eigenen Partien. */
+function showTrainHub() {
+  leaveModes();
+  S.view = 'trainhub';
+  showMain('trainhub');
+  document.title = 'Trainieren · Chess Analyzer';
+  window.scrollTo(0, 0);
+  renderTrainHub();
+}
+
+async function renderTrainHub() {
+  const pz = puzzleSummary();
+  const daily = dailyState();
+  const tn = trainerSummary();
+  const eg = endgameSummary();
+  $('th-stat').innerHTML = `Aufgaben-Wertung <b>${pz.rating}</b> · Serie <b>${daily.streak}</b>`;
+  const card = (go, icon, title, sub, extra = '') =>
+    `<button type="button" class="train-card ${extra}" data-go="${go}"><span class="tc-ico">${uiIcon(icon, 22)}</span><span class="tc-txt"><b>${title}</b><span>${sub}</span></span>${uiIcon('arrow', 18)}</button>`;
+  const html = (due) => [
+    card('aufgaben/tag', 'star', 'Tagesaufgabe', daily.done ? 'Heute schon gelöst ✓' : 'Jeden Tag eine neue', daily.done ? 'done' : 'accent'),
+    card('aufgaben', 'bulb', 'Taktikaufgaben', `Wertung ${pz.rating} · ${pz.solved} gelöst`),
+    card('training', 'target', 'Fehler-Training', due == null ? 'Deine eigenen Fehler wiederholen' : due.total ? `${due.due} fällig · ${due.total} Karten` : 'Füllt sich mit deinen Partien'),
+    card('endspiele', 'king', 'Endspiele', `${eg.done} von ${eg.total} geschafft`),
+    card('trainer/eroeffnungen', 'book', 'Eröffnungen', `${tn.learned} von ${tn.total} gelernt`),
+    card('trainer/repertoire', 'flag', 'Mein Repertoire', 'Eigene Eröffnungslinien üben'),
+    card('trainer', 'grid', 'Koordinaten', tn.coords ? `Rekord ${tn.coords} Felder` : 'Felder blitzschnell finden'),
+  ].join('');
+  $('train-grid').innerHTML = html(null);
+  trainingSummary().then((t) => { if (S.view === 'trainhub') $('train-grid').innerHTML = html(t); }).catch(() => {});
+  // Schwächen: die häufigsten Fehlerarten der eigenen Partien, sofern es dazu Aufgaben gibt
+  const metas = S.metas || (await db.all('meta').catch(() => [])).map((x) => x.value);
+  if (S.view !== 'trainhub') return;
+  const tags = {};
+  for (const m of metas) {
+    if (!m.you || !m.tags) continue;
+    for (const [t, n] of Object.entries(m.tags[m.you] || {})) tags[t] = (tags[t] || 0) + n;
+  }
+  const seen = new Set();
+  const weak = Object.entries(tags).sort((a, b) => b[1] - a[1])
+    .filter(([t]) => TAGS[t] && TAGS[t].theme && !seen.has(TAGS[t].theme) && seen.add(TAGS[t].theme))
+    .slice(0, 4);
+  $('weak-box').hidden = !weak.length;
+  $('weak-chips').innerHTML = weak.map(([t, n]) => `<button type="button" class="chip" data-theme="${TAGS[t].theme}">${esc(TAGS[t].label)} <small>${n}×</small></button>`).join('');
 }
 
 /** Räumt auf, bevor ein anderer Bereich geöffnet wird (Engine stoppen, Sondermodi beenden). */
 function leaveModes() {
+  S.navHint = null;
   if (S.pool) S.pool.cancel();
   S.pool = null;
   live.stop();
@@ -1006,33 +1229,73 @@ function goHome(fromHash) {
   S.view = 'hub';
   showMain('hub');
   setStatus('');
-  renderHistory();
   renderHub();
+  renderHistory().then(() => { if (S.view === 'hub') renderHub(); });
   syncIfStale();
   if (fromHash !== true && location.hash) history.pushState(null, '', location.pathname + location.search);
   document.title = 'Chess Analyzer';
   window.scrollTo(0, 0);
 }
 
+const isoDay = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+
 function renderHub() {
+  const now = new Date();
+  const h = now.getHours();
+  const hello = h < 5 ? 'Gute Nacht' : h < 11 ? 'Guten Morgen' : h < 18 ? 'Hallo' : 'Guten Abend';
+  const name = S.account && S.account.name ? S.account.name : '';
+  $('hub-greeting').textContent = name ? `${hello}, ${name}` : hello;
+  $('hub-date').textContent = now.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' });
+
   const { done, total, next } = lessonProgress();
-  $('tile-prog').innerHTML = `<span>${done} von ${total} geschafft</span><div class="bar"><i style="width:${(done / total) * 100}%"></i></div>`;
-  const pz = puzzleSummary();
-  $('tile-puzzles').innerHTML = `<span>Wertung ${pz.rating} · ${pz.solved} gelöst</span>`;
-  trainingSummary().then((t) => {
-    $('tile-training').innerHTML = t.total ? `<span>${t.due} fällig · ${t.total} Karten</span>` : '<span>Füllt sich mit deinen Partien</span>';
-  });
+  const daily = dailyState();
+  const card = (go, icon, kicker, title, sub, cls = '') =>
+    `<button type="button" class="today-card ${cls}" data-go="${go}"><span class="tc-ico">${uiIcon(icon, 22)}</span><span class="tc-txt"><small>${kicker}</small><b>${title}</b><span>${sub}</span></span></button>`;
+  const cards = (t) => [
+    card('aufgaben/tag', 'star', 'Tagesaufgabe', daily.done ? 'Für heute gelöst ✓' : 'Eine Aufgabe, jeden Tag neu', daily.done ? 'Morgen gibt es die nächste.' : 'Dauert etwa 2 Minuten', daily.done ? 'done' : 'accent'),
+    card('training', 'target', 'Fehler-Training', t && t.total ? (t.due ? `${t.due} ${t.due === 1 ? 'Stellung' : 'Stellungen'} fällig` : 'Alles wiederholt ✓') : 'Aus deinen Partien', t && t.total ? `${t.total} Karten aus deinen Fehlern` : 'Füllt sich, sobald du Partien analysierst'),
+    next
+      ? card('lektion/' + next.id, 'book', done ? 'Weiter lernen' : 'Erste Lektion', esc(next.title), `${done} von ${total} Lektionen geschafft`)
+      : card('lektionen', 'book', 'Lernen', 'Alle Lektionen geschafft ✓', 'Wiederhole, was du magst'),
+  ].join('');
+  $('today').innerHTML = cards(null);
+  trainingSummary().then((t) => { if (S.view === 'hub') $('today').innerHTML = cards(t); }).catch(() => {});
+
+  // Deine Woche: Tage in Folge, Aufgaben und Genauigkeit der letzten 7 Tage
   const act = store.get('activity', {});
-  const today = act[new Date().toISOString().slice(0, 10)] || {};
   const streak = dayStreak(act);
-  $('tile-profile').innerHTML = `<span>${streak === 1 ? '1 Tag' : streak + ' Tage'} in Folge · heute ${today.puzzles || 0} Aufgaben</span>`;
-  const tn = trainerSummary();
-  $('tile-trainer').innerHTML = `<span>${tn.learned} von ${tn.total} Eröffnungen${tn.coords ? ` · Rekord ${tn.coords} Felder` : ''}</span>`;
+  let puzzles = 0;
+  for (let i = 0; i < 7; i++) puzzles += (act[isoDay(new Date(now.getTime() - i * 86400000))] || {}).puzzles || 0;
+  const since = now.getTime() - 7 * 86400000;
+  const recent = (S.metas || []).filter((m) => m.at >= since && m.you && m.acc && m.acc[m.you] != null);
+  const avg = recent.length ? recent.reduce((x, m) => x + m.acc[m.you], 0) / recent.length : null;
+  const stat = (val, label) => `<div class="week-stat"><b>${val}</b><span>${label}</span></div>`;
+  $('week').innerHTML = stat(streak, streak === 1 ? 'Tag in Folge' : 'Tage in Folge')
+    + stat(puzzles, puzzles === 1 ? 'Aufgabe' : 'Aufgaben')
+    + stat(avg == null ? '–' : `${Math.round(avg)} %`, 'Genauigkeit');
+  $('week-tip').textContent = !recent.length ? 'Analysier eine Partie, dann siehst du hier deine Genauigkeit.'
+    : streak >= 3 ? `Stark – ${streak} Tage am Stück. Bleib dran!` : 'Jeden Tag ein bisschen bringt am meisten.';
   renderNewGames();
   checkNewGames();
-  const cont = $('hub-continue');
-  cont.hidden = !next || done === 0;
-  if (next) cont.innerHTML = `<div><span>Weiter lernen</span><b>${esc(next.title)}</b></div>${uiIcon('arrow', 22)}`;
+}
+
+/** „Zuletzt analysiert“ auf der Startseite (die vier neuesten Partien). */
+function renderHubRecent(metas) {
+  const list = [...metas].sort((x, y) => y.at - x.at).slice(0, 4);
+  $('hub-recent').hidden = !list.length;
+  $('hub-recent-empty').hidden = !!list.length;
+  $('hub-recent').innerHTML = list.map((h) => gameRow(h)).join('');
+}
+
+/** Eine Zeile der Partienliste (Ergebnis, Namen, Eröffnung, Genauigkeit, Datum). */
+function gameRow(h) {
+  const mine = h.you ? h.acc && h.acc[h.you] : null;
+  const res = !h.you ? 'draw' : (h.result === '1/2-1/2' ? 'draw' : (h.result === '1-0') === (h.you === 'w') ? 'win' : 'loss');
+  const letter = h.you ? { win: 'S', loss: 'N', draw: 'R' }[res] : (h.result === '1-0' ? '1' : h.result === '0-1' ? '0' : '½');
+  const info = [h.opening, mine != null ? `${mine.toFixed(0)} % genau` : '', h.date ? h.date.split('-').reverse().join('.') : ''].filter(Boolean).join(' · ');
+  return `<button type="button" class="game-item" data-id="${esc(h.id)}">
+      <span class="game-res ${res}">${letter}</span>
+      <span class="game-names">${esc(h.white)} – ${esc(h.black)}<small class="game-sub">${esc(info)}</small></span></button>`;
 }
 
 /** Seite „Partie analysieren“ (Link, Benutzername, PGN). */
@@ -1040,6 +1303,7 @@ function showAnalyze() {
   leaveModes();
   S.view = 'home';
   showMain('home');
+  renderHistory();
   warmEngine();
   setStatus('');
   document.title = 'Partie analysieren · Chess Analyzer';
@@ -1065,7 +1329,7 @@ function enterLessonView(title) {
   showMain('review');
   $('review').classList.add('lesson-mode');
   $('pane-progress').hidden = $('pane-overview').hidden = $('pane-moves').hidden = $('pane-editor').hidden = true;
-  $('controls').hidden = true;
+  updateChrome();
   $('pane-lesson').hidden = false;
   document.title = `${title} · Chess Analyzer`;
   window.scrollTo(0, 0);
@@ -1078,7 +1342,7 @@ function soloPane(id, mode, title) {
   showMain('review');
   $('review').classList.add('lesson-mode');
   for (const p of ['pane-progress', 'pane-overview', 'pane-moves', 'pane-editor', 'pane-lesson', 'pane-puzzle', 'pane-play', 'pane-training', 'pane-trainer']) $(p).hidden = p !== id;
-  $('controls').hidden = true;
+  updateChrome();
   document.title = `${title} · Chess Analyzer`;
   window.scrollTo(0, 0);
 }
@@ -1165,7 +1429,7 @@ function enterPuzzleView() {
   showMain('review');
   $('review').classList.add('lesson-mode');
   $('pane-progress').hidden = $('pane-overview').hidden = $('pane-moves').hidden = $('pane-editor').hidden = $('pane-lesson').hidden = true;
-  $('controls').hidden = true;
+  updateChrome();
   $('pane-puzzle').hidden = false;
   document.title = 'Taktikaufgaben · Chess Analyzer';
   window.scrollTo(0, 0);
@@ -1238,6 +1502,7 @@ function bindAccount() {
   const fail = async (res) => (res ? TEXT[(await res.json().catch(() => ({}))).error] : null) || 'Das hat nicht geklappt.';
   $('btn-logout').hidden = false;
   $('acc-box').hidden = false;
+  $('acc-box').dataset.ready = '1';
   $('foot-legal').hidden = false;
   $('acc-name').innerHTML = `Angemeldet als <b>${esc(me.name)}</b>.`;
   $('acc-site').value = me.site;
@@ -1249,6 +1514,7 @@ function bindAccount() {
     await clearOffline();
     location.href = location.pathname;
   };
+  $('acc-logout').onclick = () => $('btn-logout').click();
   $('btn-logout').onclick = async () => {
     // Erst alles hochladen, dann den Stand von diesem Gerät entfernen – das nächste Konto fängt hier sauber an.
     const saved = await flushSync();
@@ -1482,7 +1748,7 @@ async function runNewQueue() {
         bump('games');
         NG.queue.shift();
         NG.done.add(entry.id);
-        if (S.view === 'hub') renderHistory();
+        if (S.view === 'hub' || S.view === 'home') renderHistory();
       } catch (e) {
         if (pool.cancelled) break; // pausiert – die Partie bleibt vorn in der Warteschlange
         NG.queue.shift();
@@ -1551,7 +1817,6 @@ async function startGame(game, cached) {
   S.game = game;
   S.mode = 'game';
   $('board-tools').hidden = true;
-  $('ctl-overview').hidden = $('ctl-key').hidden = false;
   $('graph-moves').parentElement.hidden = false;
   S.review = null;
   S.variation = S.retry = null;
@@ -1563,8 +1828,9 @@ async function startGame(game, cached) {
   board.setOrientation(S.orientation);
 
   showMain('review');
-  $('pane-overview').hidden = $('pane-moves').hidden = $('controls').hidden = true;
+  $('pane-overview').hidden = $('pane-moves').hidden = true;
   $('pane-progress').hidden = false;
+  updateChrome();
   $('progress-fill').style.width = '0%';
   $('progress-label').textContent = 'Engine wird geladen …';
   document.title = `${game.white.name} – ${game.black.name} · Chess Analyzer`;
@@ -1675,11 +1941,13 @@ const ctx = () => ({ game: S.game, positions: S.review.positions, review: S.revi
 
 function showOverview() {
   live.stop();
+  if (S.view === 'moves') S.backPly = S.ply;
   S.view = 'overview';
+  S.ptab = 'coach'; // wer den Überblick verlässt, landet beim Coach
   S.variation = S.retry = null;
   $('pane-progress').hidden = $('pane-moves').hidden = true;
   $('pane-overview').hidden = false;
-  $('controls').hidden = true;
+  updateChrome();
   S.ply = S.game.moves.length;
   board.setInteractive(false);
   S.summary = summarize(ctx());
@@ -1722,8 +1990,45 @@ function showMoves() {
   S.view = 'moves';
   $('pane-progress').hidden = $('pane-overview').hidden = true;
   $('pane-moves').hidden = false;
-  $('controls').hidden = false;
+  updateChrome();
   board.setInteractive(true);
+}
+
+/**
+ * Steuerleiste und Werkzeuge unter dem Brett sowie die Reiter im Seitenbereich –
+ * je nach Modus (Partie, Analysebrett, Lektion …) und Ansicht.
+ */
+function updateChrome() {
+  const game = S.mode === 'game', boardMode = S.mode === 'board';
+  const browsing = (game || boardMode) && S.view === 'moves';
+  $('controls').hidden = $('tools').hidden = !browsing;
+  $('ctl-key').hidden = !game;
+  const tabs = (game && (S.view === 'moves' || S.view === 'overview')) || browsing;
+  $('ptabs').hidden = !tabs;
+  const panel = $('panel');
+  const tab = !tabs ? null : S.view === 'overview' ? 'overview' : S.ptab || 'coach';
+  if (tab) panel.dataset.tab = tab;
+  else delete panel.dataset.tab;
+  $('ptabs').querySelector('[data-ptab="overview"]').hidden = !game;
+  for (const b of $('ptabs').querySelectorAll('[data-ptab]')) b.setAttribute('aria-pressed', String(b.dataset.ptab === tab));
+  $('review').classList.toggle('browsing', browsing);
+}
+
+/** Reiter im Seitenbereich: Coach, Züge oder Überblick. */
+function switchPanelTab(tab) {
+  if (tab === 'overview') {
+    if (S.mode === 'game' && S.review && S.view !== 'overview') showOverview();
+    return;
+  }
+  S.ptab = tab;
+  if (S.mode === 'game' && S.view === 'overview') {
+    showMoves();
+    go(S.backPly || 0);
+  } else updateChrome();
+  if (tab === 'moves') {
+    const cur = $('moves').querySelector('.mv.active');
+    if (cur) cur.scrollIntoView({ block: 'nearest' });
+  }
 }
 
 function avatarHtml(p) {
@@ -1910,7 +2215,10 @@ function toggleOnlyBad() {
   const on = !$('moves').classList.contains('only-bad');
   $('moves').classList.toggle('only-bad', on);
   $('mt-bad').classList.toggle('on', on);
+  $('mt-bad').setAttribute('aria-pressed', String(on));
   highlightMove();
+  // Per Taste X aus dem Coach-Reiter: die gefilterte Zugliste auch zeigen
+  if (on && $('panel').dataset.tab === 'coach') switchPanelTab('moves');
 }
 
 /**
@@ -1984,21 +2292,24 @@ function deepen() {
 
 function renderTools() {
   const game = S.mode === 'game';
-  $('mv-tools').hidden = S.mode !== 'game' && S.mode !== 'board';
-  $('mt-bad').hidden = !game;
+  $('mv-tools').hidden = !game;
   $('mt-deep').hidden = !game || !!S.variation || !!S.retry;
   const deep = S.live && S.live.deep && S.live.fen === currentFen();
   $('mt-deep').classList.toggle('on', !!deep);
-  $('mt-deep').textContent = deep ? 'Tiefer rechnen: stoppen' : 'Tiefer rechnen';
+  $('mt-deep').setAttribute('aria-pressed', String(!!deep));
+  $('mt-deep').querySelector('.tool-txt').textContent = deep ? 'Stopp' : 'Tiefer';
+  $('mt-deep').title = deep ? 'Gründliches Rechnen stoppen' : 'Diese Stellung gründlicher berechnen';
   const t = S.threat && S.threat.fen === currentFen() ? S.threat : null;
   if (!t) S.threat = null;
   $('mt-threat').classList.toggle('on', !!t);
+  $('mt-threat').setAttribute('aria-pressed', String(!!t));
   // Notiz zur aktuellen Stellung (nur in der Partie selbst, nicht in Varianten)
   const canNote = game && !S.variation && !S.retry && !!S.annot && S.view === 'moves';
   const note = canNote ? S.annot.notes[S.ply] || '' : '';
   const noteOpen = canNote && (!!note || S.noteOpen === S.ply);
   $('mt-note').hidden = !canNote;
   $('mt-note').classList.toggle('on', noteOpen);
+  $('mt-note').setAttribute('aria-pressed', String(noteOpen));
   $('note-box').hidden = !noteOpen;
   if (noteOpen && document.activeElement !== $('note-text')) $('note-text').value = note;
   $('mv-note').hidden = !t;
@@ -3082,10 +3393,9 @@ function openBoard(fen, ucis = [], idx = null) {
   showMain('review');
   $('pane-progress').hidden = $('pane-overview').hidden = $('pane-editor').hidden = true;
   $('pane-moves').hidden = false;
-  $('controls').hidden = false;
   $('board-tools').hidden = false;
-  $('ctl-overview').hidden = $('ctl-key').hidden = true;
   $('graph-moves').parentElement.hidden = true;
+  updateChrome();
   document.title = 'Analysebrett · Chess Analyzer';
   if (location.hash !== '#brett') history.pushState(null, '', '#brett');
   window.scrollTo(0, 0);
@@ -3140,7 +3450,7 @@ function showEditor(fen) {
   S.live = null;
   S.view = 'editor';
   $('pane-moves').hidden = $('pane-progress').hidden = $('pane-overview').hidden = true;
-  $('controls').hidden = true;
+  updateChrome();
   $('pane-editor').hidden = false;
   document.querySelector('.panel').classList.add('is-editor');
   $('player-top').innerHTML = $('player-bottom').innerHTML = '';
